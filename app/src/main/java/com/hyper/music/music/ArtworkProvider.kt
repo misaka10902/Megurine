@@ -7,8 +7,6 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.runBlocking
 import java.security.MessageDigest
@@ -23,6 +21,10 @@ class ArtworkProvider : ContentProvider() {
             "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
 
         private val failed = ConcurrentHashMap.newKeySet<String>()
+
+        internal fun clearFailures() {
+            failed.clear()
+        }
 
         fun artworkUri(picId: String, size: Int = 1200, source: String = "netease"): Uri? {
             if (picId.isBlank()) return null
@@ -82,23 +84,11 @@ class ArtworkProvider : ContentProvider() {
             return "$url${sep}param=${size}y${size}"
         }
 
-        private fun download(url: String, timeoutMs: Int = 15_000): ByteArray? {
-            var conn: HttpURLConnection? = null
-            return try {
-                conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = timeoutMs
-                    readTimeout = timeoutMs
-                    instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", UA)
-                }
-                if (conn.responseCode !in 200..299) return null
-                conn.inputStream.use { it.readBytes() }
-            } catch (_: Throwable) {
-                null
-            } finally {
-                conn?.disconnect()
-            }
-        }
+        private fun download(url: String, timeoutMs: Int = 15_000): ByteArray? =
+            HttpClient.bytes(
+                url, timeoutMs, timeoutMs,
+                mapOf("User-Agent" to UA),
+            )
 
         private fun materialize(
             context: android.content.Context,

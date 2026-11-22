@@ -3,7 +3,6 @@ package com.hyper.music.ui.theme
 import androidx.compose.ui.graphics.lerp
 import top.yukonga.miuix.kmp.theme.Colors
 
-
 internal fun lerpColors(from: Colors, to: Colors, fraction: Float): Colors {
     val f = fraction.coerceIn(0f, 1f)
     fun c(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color) = lerp(a, b, f)

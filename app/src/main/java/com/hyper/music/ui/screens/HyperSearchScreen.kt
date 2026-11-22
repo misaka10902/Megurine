@@ -1,5 +1,6 @@
 package com.hyper.music.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -34,23 +35,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.hyper.music.music.GdApi
+import com.hyper.music.music.MusicApi
 import com.hyper.music.music.SearchAlbum
 import com.hyper.music.music.SearchArtist
+import com.hyper.music.music.SearchPlaylist
 import com.hyper.music.music.SearchHistoryStore
+import com.hyper.music.music.SearchRank
 import com.hyper.music.music.Song
 import com.hyper.music.music.WallpaperBackground
 import com.hyper.music.music.WallpaperManager
 import com.hyper.music.ui.components.ConfirmDialog
+import com.hyper.music.ui.components.GlassHeaderScrim
 import com.hyper.music.ui.components.RefreshIndicator
 import com.hyper.music.ui.effects.miuix.LocalAdvancedMaterialEnabled
 import com.hyper.music.ui.effects.miuix.rememberPopupBackdrop
@@ -58,12 +58,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.blur.Backdrop
-import top.yukonga.miuix.kmp.blur.BlendColorEntry
-import top.yukonga.miuix.kmp.blur.BlurDefaults
-import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.glass.GlassTabRow
 import top.yukonga.miuix.kmp.glass.GlassTabRowDefaults
@@ -71,14 +66,15 @@ import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.util.concurrent.atomic.AtomicInteger
 
-
 @Composable
 fun ColumnScope.HyperSearchScreen(
     query: String,
+    onQueryText: (String) -> Unit,
     onPlaySongs: (List<Song>, Int) -> Unit,
     onMore: (Song) -> Unit,
-    onOpenArtist: (String) -> Unit,
+    onOpenArtist: (String, String) -> Unit,
     onOpenAlbum: (String, String) -> Unit,
+    onOpenPlaylist: (SearchPlaylist) -> Unit,
     active: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -87,22 +83,33 @@ fun ColumnScope.HyperSearchScreen(
 
     var searchedKeyword by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
+    var pendingKeyword by remember { mutableStateOf("") }
     var songs by remember { mutableStateOf<List<Song>>(emptyList()) }
     var artists by remember { mutableStateOf<List<SearchArtist>>(emptyList()) }
     var albums by remember { mutableStateOf<List<SearchAlbum>>(emptyList()) }
+    var playlists by remember { mutableStateOf<List<SearchPlaylist>>(emptyList()) }
+    var addingPlaylistIds by remember { mutableStateOf(setOf<String>()) }
     var category by remember { mutableIntStateOf(0) }
     var page by remember { mutableIntStateOf(1) }
     var noMore by remember { mutableStateOf(false) }
     var loadingMore by remember { mutableStateOf(false) }
+    var playlistPage by remember { mutableIntStateOf(1) }
+    var playlistsNoMore by remember { mutableStateOf(false) }
+    var loadingMorePlaylists by remember { mutableStateOf(false) }
     val searchSeq = remember { AtomicInteger(0) }
     var searchJob by remember { mutableStateOf<Job?>(null) }
-    val listState = rememberLazyListState()
+    val songListState = rememberLazyListState()
+    val artistListState = rememberLazyListState()
+    val albumListState = rememberLazyListState()
+    val playlistListState = rememberLazyListState()
+    val listStates = remember(songListState, artistListState, albumListState, playlistListState) {
+        listOf(songListState, artistListState, albumListState, playlistListState)
+    }
 
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { 4 })
     val searched = searchedKeyword.isNotBlank()
     val searchHistory by SearchHistoryStore.items.collectAsState()
     val wallpaperState by WallpaperManager.state.collectAsState()
-
 
     val density = LocalDensity.current
     val searchBarBottom = with(density) { WindowInsets.statusBars.getTop(density).toDp() } + 52.dp
@@ -116,28 +123,39 @@ fun ColumnScope.HyperSearchScreen(
         val kw = keyword.trim()
         if (kw.isBlank()) return
         val my = searchSeq.incrementAndGet()
+        pendingKeyword = kw
         loading = true
         try {
             val sJob = scope.async { runCatching { GdApi.search(kw, 30, 1) }.getOrElse { emptyList() } }
+            val bJob = scope.async { runCatching { GdApi.searchBilibili(kw, 30, 1) }.getOrElse { emptyList() } }
             val aJob = scope.async { runCatching { GdApi.searchArtists(kw, 30) }.getOrElse { emptyList() } }
             val alJob = scope.async { runCatching { GdApi.searchAlbums(kw, 30) }.getOrElse { emptyList() } }
+            val pJob = scope.async { runCatching { MusicApi.searchPlaylists(kw, 30) }.getOrElse { emptyList() } }
             val sList = sJob.await()
+            val bList = bJob.await()
             val aList = aJob.await()
             val alList = alJob.await()
+            val pList = pJob.await()
             if (my != searchSeq.get()) return
 
-
-            songs = sList
+            songs = SearchRank.merge(sList, bList, kw)
             artists = aList
             albums = alList
+            playlists = pList
             page = 1
             noMore = sList.size < 30
+            playlistPage = 1
+            playlistsNoMore = pList.size < 30
+            loadingMorePlaylists = false
             if (kw != searchedKeyword) category = 0
             searchedKeyword = kw
             SearchHistoryStore.add(kw)
         } finally {
 
-            if (my == searchSeq.get()) loading = false
+            if (my == searchSeq.get()) {
+                loading = false
+                pendingKeyword = ""
+            }
         }
     }
 
@@ -145,9 +163,13 @@ fun ColumnScope.HyperSearchScreen(
         if (loadingMore || loading || noMore || searchedKeyword.isBlank()) return
         loadingMore = true
         scope.launch {
-            val next = runCatching { GdApi.search(searchedKeyword, 30, page + 1) }.getOrElse { emptyList() }
+            val nextNet = runCatching { GdApi.search(searchedKeyword, 30, page + 1) }
+                .getOrElse { emptyList() }
+            val nextBili = runCatching { GdApi.searchBilibili(searchedKeyword, 30, page + 1) }
+                .getOrElse { emptyList() }
+            val next = SearchRank.merge(nextNet, nextBili, searchedKeyword)
             val fresh = next.filter { n -> songs.none { it.id == n.id } }
-            if (fresh.isEmpty()) noMore = true else {
+            if (nextNet.isEmpty()) noMore = true else {
                 songs = songs + fresh
                 page += 1
             }
@@ -155,6 +177,23 @@ fun ColumnScope.HyperSearchScreen(
         }
     }
 
+    fun loadMorePlaylists() {
+        if (loadingMorePlaylists || loading || playlistsNoMore || searchedKeyword.isBlank()) return
+        loadingMorePlaylists = true
+        scope.launch {
+            val next = runCatching {
+                MusicApi.searchPlaylists(searchedKeyword, 30, playlistPage * 30)
+            }.getOrElse { emptyList() }
+            val fresh = next.filter { n -> playlists.none { it.id == n.id } }
+            if (fresh.isEmpty()) {
+                playlistsNoMore = true
+            } else {
+                playlists = playlists + fresh
+                playlistPage += 1
+            }
+            loadingMorePlaylists = false
+        }
+    }
 
     LaunchedEffect(query) {
         val kw = query.trim()
@@ -163,15 +202,22 @@ fun ColumnScope.HyperSearchScreen(
             songs = emptyList()
             artists = emptyList()
             albums = emptyList()
+            playlists = emptyList()
             searchedKeyword = ""
+            pendingKeyword = ""
             loading = false
             page = 1
             noMore = false
+            playlistPage = 1
+            playlistsNoMore = false
+            loadingMorePlaylists = false
             return@LaunchedEffect
         }
-        delay(500)
+        if (kw == searchedKeyword || kw == pendingKeyword) return@LaunchedEffect
+        loading = true
+        delay(400)
         if (query.trim() != kw) return@LaunchedEffect
-        if (kw == searchedKeyword) return@LaunchedEffect
+        if (kw == searchedKeyword || kw == pendingKeyword) return@LaunchedEffect
         searchJob?.cancel()
         searchJob = scope.launch { runThreeWaySearch(kw) }
     }
@@ -180,38 +226,66 @@ fun ColumnScope.HyperSearchScreen(
         snapshotFlow { pagerState.currentPage }.collect { category = it }
     }
 
-    LaunchedEffect(listState, songs.size, category) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
+    LaunchedEffect(songListState, songs.size) {
+        snapshotFlow { songListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
             .collect { last ->
-                if (searched && category == 0 && songs.isNotEmpty() && last >= songs.size - 6) {
+                if (searched && songs.isNotEmpty() && last >= songs.size - 6) {
                     loadMoreSongs()
                 }
             }
     }
 
+    LaunchedEffect(playlistListState, playlists.size) {
+        snapshotFlow { playlistListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
+            .collect { last ->
+                if (searched && playlists.isNotEmpty() && last >= playlists.size - 4) {
+                    loadMorePlaylists()
+                }
+            }
+    }
 
     LaunchedEffect(active) {
         if (!active) {
             searchJob?.cancel()
             delay(520)
             searchedKeyword = ""
+            pendingKeyword = ""
             songs = emptyList()
             artists = emptyList()
             albums = emptyList()
+            playlists = emptyList()
+            addingPlaylistIds = emptySet()
             category = 0
             page = 1
             noMore = false
             loadingMore = false
+            playlistPage = 1
+            playlistsNoMore = false
+            loadingMorePlaylists = false
             loading = false
         }
     }
 
     DisposableEffect(Unit) { onDispose { searchJob?.cancel() } }
 
+    val addPlaylistToLibrary: (SearchPlaylist) -> Unit = { p ->
+        if (p.id !in addingPlaylistIds) {
+            addingPlaylistIds = addingPlaylistIds + p.id
+            scope.launch {
+                val ok = addOnlinePlaylistToLibrary(p.id, p.name, p.cover)
+                addingPlaylistIds = addingPlaylistIds - p.id
+                Toast.makeText(
+                    context,
+                    if (ok) "已添加该歌单" else "添加失败，请重试",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
 
     val stage = when {
-        searched -> SearchStage.Results
         loading -> SearchStage.Loading
+        searched -> SearchStage.Results
         else -> SearchStage.History
     }
     AnimatedContent(
@@ -225,7 +299,6 @@ fun ColumnScope.HyperSearchScreen(
         when (current) {
         SearchStage.History -> {
 
-
             Box(modifier = Modifier.fillMaxSize().imePadding()) {
                 SearchHistorySection(
                     history = searchHistory,
@@ -236,9 +309,14 @@ fun ColumnScope.HyperSearchScreen(
                         clearingHistory = false
                     },
                     onPick = { keyword ->
-
-
-                        scope.launch { runThreeWaySearch(keyword) }
+                        onQueryText(keyword)
+                        val kw = keyword.trim()
+                        if (kw.isNotBlank() && kw != searchedKeyword) {
+                            pendingKeyword = kw
+                            loading = true
+                            searchJob?.cancel()
+                            searchJob = scope.launch { runThreeWaySearch(kw) }
+                        }
                     },
                     onClear = { showClearHistoryDialog = true },
                 )
@@ -251,16 +329,18 @@ fun ColumnScope.HyperSearchScreen(
             val tabTop = searchBarBottom + 12.dp
             val listTop = tabTop + GlassTabRowDefaults.Height + 12.dp
 
-
             val scrimHeight = tabTop + GlassTabRowDefaults.Height + 24.dp
             val headerBackdrop = rememberLayerBackdrop { drawContent() }
 
-
             val rampPx = with(density) { 48.dp.toPx() }
-            val scrolled by remember(listState) {
+            val scrolled by remember(pagerState, listStates) {
                 derivedStateOf {
-                    if (listState.firstVisibleItemIndex > 0) 1f
-                    else (listState.firstVisibleItemScrollOffset / rampPx).coerceIn(0f, 1f)
+                    val state = listStates.getOrNull(pagerState.currentPage)
+                    when {
+                        state == null -> 0f
+                        state.firstVisibleItemIndex > 0 -> 1f
+                        else -> (state.firstVisibleItemScrollOffset / rampPx).coerceIn(0f, 1f)
+                    }
                 }
             }
             val headerStrength by animateFloatAsState(
@@ -269,15 +349,13 @@ fun ColumnScope.HyperSearchScreen(
                 label = "searchHeaderBand",
             )
 
-
             Box(modifier = Modifier.fillMaxSize()) {
-
 
                 LaunchedEffect(searchedKeyword) {
                     if (searchedKeyword.isNotBlank()) {
                         if (pagerState.currentPage != 0) pagerState.scrollToPage(0)
 
-                        listState.scrollToItem(0)
+                        listStates.forEach { it.scrollToItem(0) }
                     }
                 }
                 Box(
@@ -285,7 +363,6 @@ fun ColumnScope.HyperSearchScreen(
                         .fillMaxSize()
                         .layerBackdrop(headerBackdrop),
                 ) {
-
 
                     if (wallpaperState.hasImage) {
                         WallpaperBackground()
@@ -307,21 +384,26 @@ fun ColumnScope.HyperSearchScreen(
                             songs = songs,
                             artists = artists,
                             albums = albums,
+                            playlists = playlists,
                             loading = loading,
-                            listState = listState,
+                            listStates = listStates,
                             topPadding = listTop,
                             onPlaySongs = onPlaySongs,
                             onMore = onMore,
                             onOpenArtist = onOpenArtist,
                             onOpenAlbum = onOpenAlbum,
+                            onOpenPlaylist = onOpenPlaylist,
+                            onAddPlaylist = addPlaylistToLibrary,
+                            addingPlaylistIds = addingPlaylistIds,
                             onLoadMoreSongs = { loadMoreSongs() },
                             loadingMoreSongs = loadingMore,
+                            onLoadMorePlaylists = { loadMorePlaylists() },
+                            loadingMorePlaylists = loadingMorePlaylists,
                         )
                     }
                 }
 
-
-                SearchHeaderScrim(
+                GlassHeaderScrim(
                     backdrop = headerBackdrop,
                     advanced = advancedHeader,
                     strength = headerStrength,
@@ -338,13 +420,13 @@ fun ColumnScope.HyperSearchScreen(
                         .zIndex(2f),
                 ) {
                     GlassTabRow(
-                        tabs = listOf("歌曲", "歌手", "专辑"),
+                        tabs = listOf("歌曲", "歌手", "专辑", "歌单"),
                         selectedIndex = pagerState.currentPage,
                         onSelect = { index ->
 
                             scope.launch { pagerState.animateScrollToPage(index) }
                         },
-                        backdrop = null,
+                        backdrop = if (advancedHeader) headerBackdrop else null,
                         modifier = Modifier.fillMaxWidth(),
                         colors = GlassTabRowDefaults.primaryColors(),
                     )
@@ -368,9 +450,7 @@ fun ColumnScope.HyperSearchScreen(
     )
 }
 
-
 private enum class SearchStage { History, Loading, Results }
-
 
 @Composable
 private fun SearchLoadingView() {
@@ -382,48 +462,3 @@ private fun SearchLoadingView() {
     }
 }
 
-
-@Composable
-private fun SearchHeaderScrim(
-    backdrop: Backdrop,
-    advanced: Boolean,
-    strength: Float,
-    modifier: Modifier = Modifier,
-) {
-    val scheme = MiuixTheme.colorScheme
-
-
-    if (advanced) {
-        val blendColors = remember(scheme.surface) {
-            listOf(BlendColorEntry(scheme.surface.copy(alpha = 0.3f)))
-        }
-        val colors = BlurDefaults.blurColors(blendColors = blendColors)
-        Box(
-            modifier = modifier
-                .graphicsLayer { alpha = strength }
-                .progressiveTextureBlur(
-                    backdrop = backdrop,
-                    shape = RectangleShape,
-                    gradient = ProgressiveBlur.Top.copy(curve = 0.5f),
-                    blurRadius = GlassTopAppBarDefaults.ProgressiveBlurRadius.value,
-                    colors = colors,
-                    enabled = strength > 0.01f,
-                ),
-        )
-    } else {
-        Box(
-            modifier = modifier
-                .graphicsLayer { alpha = strength }
-                .drawWithContent {
-                    drawContent()
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            0f to scheme.surface.copy(alpha = 0.94f),
-                            0.5f to scheme.surface.copy(alpha = 0.55f),
-                            1f to Color.Transparent,
-                        ),
-                    )
-                },
-        )
-    }
-}

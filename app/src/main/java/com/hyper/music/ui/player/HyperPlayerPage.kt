@@ -1,18 +1,23 @@
 package com.hyper.music.ui.player
 
+import android.app.Activity
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -28,6 +33,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,33 +44,33 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -72,47 +78,56 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hyper.music.music.CoverLoader
-import com.hyper.music.music.CoverSize
+import com.hyper.music.R
+import com.hyper.music.music.ListenMoeController
+import com.hyper.music.music.ListenMoeStation
 import com.hyper.music.music.GdApi
 import com.hyper.music.music.LocalLyrics
 import com.hyper.music.music.LyricLine
 import com.hyper.music.music.MusicLibrary
-import com.hyper.music.music.NetCover
-import com.hyper.music.ui.utils.saveCoverOnLongPress
+import com.hyper.music.music.MusicSettings
+import com.hyper.music.music.PlaybackController
 import com.hyper.music.music.PlayMode
 import com.hyper.music.music.buildLyrics
 import com.hyper.music.music.currentLineIndex
 import com.hyper.music.ui.effects.miuix.LocalAdvancedMaterialEnabled
+import com.hyper.music.ui.utils.applyThemeAwareSystemBars
+import com.hyper.music.ui.utils.isAppDarkTheme
 import com.hyper.music.ui.utils.isCompactWindow
 import com.hyper.music.ui.utils.rememberWindowSizeDp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.blur.blur
-import top.yukonga.miuix.kmp.blur.drawBackdrop
-import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.basic.TooltipBox
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.glass.AfterSalesPolicy
 import top.yukonga.miuix.kmp.icon.extended.Favorites
 import top.yukonga.miuix.kmp.icon.extended.FavoritesFill
 import top.yukonga.miuix.kmp.icon.extended.More
-import top.yukonga.miuix.kmp.icon.extended.Music
 import top.yukonga.miuix.kmp.icon.extended.Pause
 import top.yukonga.miuix.kmp.icon.extended.Play
 import top.yukonga.miuix.kmp.icon.extended.Playlist
+import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.Timer
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import kotlinx.coroutines.Dispatchers
-import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.foundation.layout.fillMaxHeight
-import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.icon.glass.OpenWithOtherApp
 
-private val PageTextPrimary = Color.White
-private val PageTextSecondary = Color.White.copy(alpha = 0.66f)
-private val ControlTint = Color.White
-private val ControlTintDim = Color.White.copy(alpha = 0.78f)
+internal object PlayerPagePalette {
+    var lightMode by mutableStateOf(false)
+        private set
+
+    fun setLight(value: Boolean) {
+        if (lightMode != value) lightMode = value
+    }
+
+    val primary: Color get() = if (lightMode) Color(0xFF15151A) else Color.White
+    val secondary: Color get() = primary.copy(alpha = 0.66f)
+    val controlDim: Color get() = primary.copy(alpha = 0.78f)
+}
+
+private val PageTextPrimary: Color get() = PlayerPagePalette.primary
+private val PageTextSecondary: Color get() = PlayerPagePalette.secondary
+private val ControlTint: Color get() = PlayerPagePalette.primary
+private val ControlTintDim: Color get() = PlayerPagePalette.controlDim
 
 private object PlayerSpacing {
     val ProgressSideInset = 20.dp
@@ -122,6 +137,8 @@ private object PlayerSpacing {
     val MainControlGap = 20.dp
     val FunctionRowInset = 24.dp
 }
+
+private val PageSideInset = 18.dp
 
 data class PlayerReveal(
     val header: Float = 1f,
@@ -140,14 +157,12 @@ fun HyperPlayerPageContent(
 ) {
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
+    val radio by ListenMoeController.state.collectAsState()
     val track = state.track
+    val settings by MusicLibrary.settings.collectAsState()
     val favorites by MusicLibrary.favorites.collectAsState()
     val isFavorite = state.playback.song?.let { song -> favorites.any { it.id == song.id } } ?: false
-    fun toggleFavorite() {
-        val song = state.playback.song ?: return
 
-        MusicLibrary.toggleFavorite(song)
-    }
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         .coerceAtLeast(26.dp)
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -160,87 +175,104 @@ fun HyperPlayerPageContent(
         label = "coverScale",
     )
 
-    val settings by MusicLibrary.settings.collectAsState()
+    val flowMode = settings.playerBackground == "flow"
+    val flowDark = when (settings.flowStyle) {
+        "dark" -> true
+        "light" -> false
+        else -> isAppDarkTheme()
+    }
+    SideEffect { PlayerPagePalette.setLight(flowMode && !flowDark) }
+    val lightSystemBars = flowMode && !flowDark
+    DisposableEffect(lightSystemBars) {
+        val activity = context as? Activity
+        if (lightSystemBars) activity?.applyThemeAwareSystemBars(false)
+        onDispose { if (lightSystemBars) activity?.applyThemeAwareSystemBars() }
+    }
+
     val circular = settings.coverCircular
     val pageCorner = if (circular) CoverCircleCorner else PlayPageCoverCorner
+
     var showLyrics by remember { mutableStateOf(false) }
-    var swipeProgress by remember { mutableFloatStateOf(0f) }
+    val radioActive = radio.active
     val lyricSong = state.playback.song
     var lyricLoading by remember { mutableStateOf(false) }
     val lyrics by produceState<List<LyricLine>>(
         initialValue = emptyList(),
         key1 = lyricSong?.id.orEmpty(),
+        key2 = radioActive,
     ) {
         value = emptyList()
+        if (radioActive) {
+            lyricLoading = false
+            return@produceState
+        }
         lyricLoading = true
         val song = lyricSong
-        val data = if (song == null) {
-            null
-        } else if (song.isLocal) {
-
-            runCatching {
-                withContext(kotlinx.coroutines.Dispatchers.IO) { LocalLyrics.read(context, song) }
+        val data = when {
+            song == null -> null
+            song.isLocal -> runCatching {
+                withContext(Dispatchers.IO) { LocalLyrics.read(context, song) }
             }.getOrNull()
-        } else if (track.lyricId.isNotBlank()) {
-            runCatching { GdApi.fullLyric(song) }.getOrNull()
-        } else {
-            null
+            track.lyricId.isNotBlank() -> runCatching { GdApi.fullLyric(song) }.getOrNull()
+            else -> null
         }
-        value = if (data != null) buildLyrics(data.lyric, data.translation) else emptyList()
+        value = data?.let { buildLyrics(it.lyric, it.translation, it.roman) } ?: emptyList()
         lyricLoading = false
     }
-    val lyricIndex = currentLineIndex(lyrics, state.positionMs)
+
+    LaunchedEffect(radioActive) {
+        if (radioActive) showLyrics = false
+    }
 
     var cachedLyrics by remember { mutableStateOf(emptyList<LyricLine>()) }
+    LaunchedEffect(lyricSong?.id) { cachedLyrics = emptyList() }
     LaunchedEffect(lyrics) { if (lyrics.isNotEmpty()) cachedLyrics = lyrics }
-    val shownLyrics = if (lyrics.isNotEmpty()) lyrics
-        else if (lyricLoading) cachedLyrics
-        else emptyList()
-
-    val coverBackdrop = rememberLayerBackdrop {
-        drawRect(Color.Transparent)
-        drawContent()
+    val shownLyrics = when {
+        lyrics.isNotEmpty() -> lyrics
+        lyricLoading -> cachedLyrics
+        else -> emptyList()
     }
-    val artwork by produceState<Pair<ImageBitmap?, AlbumPalette?>>(
-        initialValue = null to null,
-        key1 = track.coverUrl,
-    ) {
-        val url = track.coverUrl
-        if (url.isNullOrBlank()) return@produceState
-        val bmp = withContext(Dispatchers.Default) {
-            runCatching { CoverLoader.load(url, maxSize = CoverSize.LARGE.decode) }.getOrNull()
+    val shownIndex = currentLineIndex(shownLyrics, state.positionMs)
+
+    val artworkState = remember {
+        mutableStateOf<Pair<ImageBitmap?, AlbumPalette?>>(
+            PlayerArtwork.peek(track.coverUrl) ?: (null to null),
+        )
+    }
+    val artworkUrl = track.coverUrl
+    LaunchedEffect(artworkUrl) {
+        if (artworkUrl.isNullOrBlank()) {
+            artworkState.value = null to null
+            return@LaunchedEffect
         }
-        val pal = bmp?.let {
-            withContext(Dispatchers.Default) {
-                runCatching { AlbumPaletteExtractor.paletteOf(it.asAndroidBitmap()) }.getOrNull()
+        val cached = PlayerArtwork.peek(artworkUrl)
+        if (cached != null) {
+            artworkState.value = cached
+            return@LaunchedEffect
+        }
+        val loaded = PlayerArtwork.load(artworkUrl) ?: return@LaunchedEffect
+        if (track.coverUrl == artworkUrl) artworkState.value = loaded
+    }
+    val artwork = artworkState.value
+
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current
+    val scope = rememberCoroutineScope()
+    var fetchingOnline by remember { mutableStateOf(false) }
+    val onFetchOnline: () -> Unit = {
+        if (!fetchingOnline) {
+            fetchingOnline = true
+            scope.launch {
+                val match = runCatching { ListenMoeController.findNeteaseMatch() }.getOrNull()
+                fetchingOnline = false
+                if (match != null) {
+                    val startAt = ListenMoeController.positionMs()
+                    PlaybackController.playSongs(listOf(match), 0, startAt)
+                } else {
+                    Toast.makeText(context, "未找到同名歌曲", Toast.LENGTH_SHORT).show()
+                }
             }
         }
-        value = bmp to pal
     }
-    val coverBitmap = artwork.first
-    val palette = artwork.second
-
-    val fallback = Color(0xFF6E6E73)
-    val topColor by animateColorAsState(
-        targetValue = palette?.top ?: fallback.copy(alpha = 0.92f),
-        animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing),
-        label = "bgTop",
-    )
-    val middleColor by animateColorAsState(
-        targetValue = palette?.middle ?: fallback.copy(alpha = 0.55f),
-        animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing),
-        label = "bgMiddle",
-    )
-    val bottomColor by animateColorAsState(
-        targetValue = palette?.bottom ?: Color.Black,
-        animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing),
-        label = "bgBottom",
-    )
-    val accentColor by animateColorAsState(
-        targetValue = palette?.accent ?: fallback,
-        animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing),
-        label = "bgAccent",
-    )
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val windowSize = rememberWindowSizeDp()
@@ -252,438 +284,536 @@ fun HyperPlayerPageContent(
             1f
         }
 
-        Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = state.expandProgress.coerceIn(0f, 1f) }) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clipToBounds()
-                .layerBackdrop(coverBackdrop),
-        ) {
-            Crossfade(
-                targetState = coverBitmap,
-                animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
-                label = "playerBgCover",
-            ) { bmp ->
-                if (bmp != null) {
-                    Image(
-                        bitmap = bmp,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize().scale(1.2f),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    0f to Color(0xFF6E6E73),
-                                    1f to Color(0xFF1C1C1E),
-                                )
-                            ),
-                    )
-                }
-            }
-        }
-
-        val advancedMaterial = LocalAdvancedMaterialEnabled.current
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(
-                    if (advancedMaterial) {
-                        Modifier.drawBackdrop(
-                            backdrop = coverBackdrop,
-                            shape = { RectangleShape },
-                            effects = { blur(48f.dp.toPx()) },
-                        )
-                    } else {
-                        Modifier
-                    }
-                ),
+        PlayerBackground(
+            expandProgress = state.expandProgress,
+            flowMode = flowMode,
+            flowDark = flowDark,
+            coverBitmap = artwork.first,
+            palette = artwork.second,
+            advancedMaterial = advancedMaterial,
         )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to topColor.copy(alpha = if (advancedMaterial && coverBitmap != null) 0.82f else 1f),
-                        0.42f to middleColor.copy(alpha = if (advancedMaterial && coverBitmap != null) 0.78f else 1f),
-                        1f to bottomColor.copy(alpha = if (advancedMaterial && coverBitmap != null) 0.86f else 1f),
-                    )
-                )
-    ,
-        )
-
-        }
 
         if (isLandscape) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize(),
-            ) {
             LandscapePlayerUi(
                 state = state,
                 track = track,
                 reveal = reveal,
+                settings = settings,
                 isFavorite = isFavorite,
                 circular = circular,
                 pageCorner = pageCorner,
-                onToggleFavorite = { toggleFavorite() },
+                coverScale = coverScale,
+                lyrics = shownLyrics,
+                lyricIndex = shownIndex,
+                showLyrics = showLyrics && !radioActive,
+                onShowLyricsChange = { showLyrics = it },
+                onToggleFavorite = { state.playback.song?.let { MusicLibrary.toggleFavorite(it) } },
                 onOpenQueue = onOpenQueue,
                 onMore = onMore,
                 onOpenSleepTimer = onOpenSleepTimer,
-                lyrics = lyrics,
-                lyricIndex = lyricIndex,
-                showLyrics = showLyrics,
-                onShowLyricsChange = { showLyrics = it },
                 haptic = haptic,
-                coverScale = coverScale,
-                showLyricsTranslation = settings.showLyricsTranslation,
-                lyricCentered = settings.lyricCentered,
-                lyricSwitchOnTap = settings.lyricSwitchOnTap,
+                radioMode = radio.active,
+                radioStation = radio.station,
+                onSwitchStation = { ListenMoeController.switchStation() },
+                onFetchOnline = onFetchOnline,
+                fetchingOnline = fetchingOnline,
             )
-            }
         } else {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(
-                    start = 18.dp,
-                    end = 18.dp,
-                    top = contentTopPadding,
-                    bottom = navBarPadding + 12.dp,
-                ),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            PlayerTitle(
+            PortraitPlayerUi(
+                state = state,
                 track = track,
-                revealHeader = reveal.header,
-                centered = settings.titleCentered,
+                reveal = reveal,
+                settings = settings,
+                isFavorite = isFavorite,
+                circular = circular,
+                pageCorner = pageCorner,
+                coverScale = coverScale,
+                lyrics = shownLyrics,
+                lyricIndex = shownIndex,
+                showLyrics = showLyrics && !radioActive,
+                onShowLyricsChange = { showLyrics = it },
+                onToggleFavorite = { state.playback.song?.let { MusicLibrary.toggleFavorite(it) } },
+                onOpenQueue = onOpenQueue,
+                onMore = onMore,
+                onOpenSleepTimer = onOpenSleepTimer,
+                haptic = haptic,
+                compact = compact,
+                scale = scale,
+                contentTopPadding = contentTopPadding,
+                navBarPadding = navBarPadding,
+                radioMode = radio.active,
+                radioStation = radio.station,
+                onSwitchStation = { ListenMoeController.switchStation() },
+                onFetchOnline = onFetchOnline,
+                fetchingOnline = fetchingOnline,
             )
+        }
+    }
+}
 
-            val lyricsReady = lyrics.isNotEmpty()
-            val coverZoneTopBias = if (compact) 12.dp else 0.dp
-            BoxWithConstraints(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = coverZoneTopBias)
-                    .then(
-                        if (track.hasSong && !settings.lyricSwitchOnTap) {
-                            Modifier.pointerInput(showLyrics) {
-                                val threshold = size.width * 0.14f
-                                detectHorizontalDragGestures(
-                                    onDragStart = { swipeProgress = 0f },
-                                    onDragEnd = { swipeProgress = 0f },
-                                    onDragCancel = { swipeProgress = 0f },
-                                ) { change, dragAmount ->
-                                    change.consume()
-                                    swipeProgress += -dragAmount
-                                    if (!showLyrics && swipeProgress > threshold) {
-                                        swipeProgress = 0f
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        showLyrics = true
-                                    } else if (showLyrics && swipeProgress < -threshold) {
-                                        swipeProgress = 0f
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        showLyrics = false
-                                    }
-                                }
-                            }
-                        } else {
-                            Modifier
-                        }
-                    ),
-                contentAlignment = if (compact) Alignment.BottomCenter else Alignment.Center,
-            ) {
-            val coverSize = (minOf(maxWidth, maxHeight) * CoverSizeFraction)
-                .coerceAtLeast(0.dp)
+@Composable
+private fun PortraitPlayerUi(
+    state: HyperPlayerState,
+    track: PlayerTrack,
+    reveal: PlayerReveal,
+    settings: MusicSettings,
+    isFavorite: Boolean,
+    circular: Boolean,
+    pageCorner: Dp,
+    coverScale: Float,
+    lyrics: List<LyricLine>,
+    lyricIndex: Int,
+    showLyrics: Boolean,
+    onShowLyricsChange: (Boolean) -> Unit,
+    onToggleFavorite: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onMore: () -> Unit,
+    onOpenSleepTimer: () -> Unit,
+    haptic: HapticFeedback,
+    compact: Boolean,
+    scale: Float,
+    contentTopPadding: Dp,
+    navBarPadding: Dp,
+    radioMode: Boolean,
+    radioStation: ListenMoeStation,
+    onSwitchStation: () -> Unit,
+    onFetchOnline: () -> Unit,
+    fetchingOnline: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                top = contentTopPadding,
+                bottom = navBarPadding + 12.dp,
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        PlayerTitle(
+            track = track,
+            revealHeader = reveal.header,
+            centered = settings.titleCentered,
+            modifier = Modifier.padding(horizontal = PageSideInset),
+        )
 
-            val expandLyricsArea = !compact
-            Crossfade(
-                targetState = showLyrics,
-                animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
-                label = "coverOrLyrics",
-            ) { isLyrics ->
+        PlayerStage(
+            state = state,
+            track = track,
+            circular = circular,
+            pageCorner = pageCorner,
+            coverFraction = CoverSizeFraction,
+            coverScale = coverScale,
+            showLyrics = showLyrics,
+            onShowLyricsChange = onShowLyricsChange,
+            lines = lyrics,
+            currentIndex = lyricIndex,
+            showTranslation = settings.showLyricsTranslation,
+            lyricCentered = settings.lyricCentered,
+            lyricSwitchOnTap = settings.lyricSwitchOnTap,
+            allowLyricSwitch = !radioMode,
+            lyricInset = PageSideInset + PlayerSpacing.ProgressSideInset,
+            alignment = if (compact) Alignment.BottomCenter else Alignment.Center,
+            contentInset = PageSideInset,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(top = if (compact) 12.dp else 0.dp),
+        )
 
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = if (compact) Alignment.BottomCenter else Alignment.Center,
+        Spacer(Modifier.height(if (compact) 12.dp else 0.dp))
+
+        PlayerTransport(
+            state = state,
+            track = track,
+            isFavorite = isFavorite,
+            onToggleFavorite = onToggleFavorite,
+            onOpenQueue = onOpenQueue,
+            onMore = onMore,
+            onOpenSleepTimer = onOpenSleepTimer,
+            haptic = haptic,
+            scale = scale,
+            reveal = reveal.controls,
+            topSpacer = if (compact) 0.dp else 20.dp,
+            modifier = Modifier.padding(horizontal = PageSideInset),
+            radioMode = radioMode,
+            radioStation = radioStation,
+            onSwitchStation = onSwitchStation,
+            onFetchOnline = onFetchOnline,
+            fetchingOnline = fetchingOnline,
+        )
+    }
+}
+
+@Composable
+private fun LandscapePlayerUi(
+    state: HyperPlayerState,
+    track: PlayerTrack,
+    reveal: PlayerReveal,
+    settings: MusicSettings,
+    isFavorite: Boolean,
+    circular: Boolean,
+    pageCorner: Dp,
+    coverScale: Float,
+    lyrics: List<LyricLine>,
+    lyricIndex: Int,
+    showLyrics: Boolean,
+    onShowLyricsChange: (Boolean) -> Unit,
+    onToggleFavorite: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onMore: () -> Unit,
+    onOpenSleepTimer: () -> Unit,
+    haptic: HapticFeedback,
+    radioMode: Boolean,
+    radioStation: ListenMoeStation,
+    onSwitchStation: () -> Unit,
+    onFetchOnline: () -> Unit,
+    fetchingOnline: Boolean,
+) {
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding().coerceAtLeast(26.dp)
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding().coerceAtLeast(16.dp)
+
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = 28.dp, end = 28.dp, top = statusTop, bottom = navBottom),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PlayerStage(
+            state = state,
+            track = track,
+            circular = circular,
+            pageCorner = pageCorner,
+            coverFraction = 0.86f,
+            coverScale = coverScale,
+            showLyrics = showLyrics,
+            onShowLyricsChange = onShowLyricsChange,
+            lines = lyrics,
+            currentIndex = lyricIndex,
+            showTranslation = settings.showLyricsTranslation,
+            lyricCentered = settings.lyricCentered,
+            lyricSwitchOnTap = settings.lyricSwitchOnTap,
+            allowLyricSwitch = !radioMode,
+            lyricInset = null,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .padding(end = 24.dp),
+        )
+
+        PlayerTransport(
+            state = state,
+            track = track,
+            isFavorite = isFavorite,
+            onToggleFavorite = onToggleFavorite,
+            onOpenQueue = onOpenQueue,
+            onMore = onMore,
+            onOpenSleepTimer = onOpenSleepTimer,
+            haptic = haptic,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+            centerVertically = true,
+            radioMode = radioMode,
+            radioStation = radioStation,
+            onSwitchStation = onSwitchStation,
+            onFetchOnline = onFetchOnline,
+            fetchingOnline = fetchingOnline,
+            title = {
+                PlayerTitle(
+                    track = track,
+                    revealHeader = reveal.header,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp),
+                    centered = settings.titleCentered,
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun PlayerTransport(
+    state: HyperPlayerState,
+    track: PlayerTrack,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onMore: () -> Unit,
+    onOpenSleepTimer: () -> Unit,
+    haptic: HapticFeedback,
+    modifier: Modifier = Modifier,
+    scale: Float = 1f,
+    reveal: Float = 1f,
+    topSpacer: Dp = 0.dp,
+    centerVertically: Boolean = false,
+    radioMode: Boolean = false,
+    radioStation: ListenMoeStation = ListenMoeStation.JPOP,
+    onSwitchStation: () -> Unit = {},
+    onFetchOnline: () -> Unit = {},
+    fetchingOnline: Boolean = false,
+    title: (@Composable () -> Unit)? = null,
+) {
+    Column(
+        modifier = modifier.graphicsLayer {
+            val e = reveal.coerceIn(0f, 1f)
+            alpha = e
+            translationY = (1f - e) * 28.dp.toPx()
+        },
+        verticalArrangement = if (centerVertically) Arrangement.Center else Arrangement.Top,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        title?.invoke()
+        if (topSpacer > 0.dp) Spacer(Modifier.height(topSpacer))
+
+        AnimatedVisibility(
+            visible = !radioMode,
+            enter = fadeIn(tween(320)) + expandVertically(tween(320, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(180)) + shrinkVertically(tween(240, easing = FastOutSlowInEasing)),
+        ) {
+            Column {
+                HyperProgressBar(
+                    progress = safeProgress(state.positionMs, track.durationMs),
+                    onSeek = { state.seekTo((it * track.durationMs).toLong()) },
+                    onSeekFinished = { state.seekTo((it * track.durationMs).toLong()) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = PlayerSpacing.ProgressSideInset),
+                )
+                Spacer(Modifier.height(PlayerSpacing.ProgressToTime))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = PlayerSpacing.ProgressSideInset),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    if (isLyrics && expandLyricsArea) {
-
-                        Crossfade(
-                            targetState = shownLyrics,
-                            animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
-                            label = "lyricsSwitch",
-                        ) { lines ->
-                            if (lines.isNotEmpty()) {
-                                HyperLyricsView(
-                                    lines = lines,
-                                    currentIndex = currentLineIndex(lines, state.positionMs),
-                                    showTranslation = settings.showLyricsTranslation,
-                                    centered = settings.lyricCentered,
-                                    onSeek = { state.seekTo(it) },
-                                    modifier = Modifier.fillMaxSize(),
-                                    onDismiss = { showLyrics = false },
-                                )
-                            } else {
-                                NoLyricsHint()
-                            }
-                        }
-                    } else {
-
-                        Box(
-                            modifier = Modifier
-                                .size(coverSize)
-                                .graphicsLayer { alpha = state.expandProgress.coerceIn(0f, 1f) }
-                                .coverFrame(circular, pageCorner)
-                                .then(
-                                    if (track.hasSong) {
-                                        Modifier
-                                    } else {
-                                        Modifier.background(
-                                            MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.6f)
-                                        )
-                                    }
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isLyrics) {
-
-                                if (lyricsReady) {
-                                    HyperLyricsView(
-                                        lines = lyrics,
-                                        currentIndex = lyricIndex,
-                                        showTranslation = settings.showLyricsTranslation,
-                                        centered = settings.lyricCentered,
-                                        onSeek = { state.seekTo(it) },
-                                        modifier = Modifier.fillMaxSize(),
-                                        onDismiss = { showLyrics = false },
-                                    )
-                                } else {
-                                    NoLyricsHint(
-                                        onBack = if (settings.lyricSwitchOnTap) {
-                                            { showLyrics = false }
-                                        } else null,
-                                    )
-                                }
-                            } else {
-                                when {
-                                    track.hasSong -> Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .scale(coverScale)
-                                            .saveCoverOnLongPress(
-                                                url = track.coverUrl,
-                                                name = track.title,
-                                                onTap = if (settings.lyricSwitchOnTap) {
-                                                    {
-                                                        haptic.performHapticFeedback(
-                                                            HapticFeedbackType.TextHandleMove
-                                                        )
-                                                        showLyrics = true
-                                                    }
-                                                } else null,
-                                            ),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Crossfade(
-                                            targetState = track.coverUrl ?: "",
-                                            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
-                                            label = "albumCrossfade",
-                                        ) { url ->
-                                            if (url.isBlank()) {
-                                                Image(
-                                                    imageVector = MiuixIcons.Music,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(88.dp),
-                                                    colorFilter = ColorFilter.tint(Color.White.copy(alpha = 0.92f)),
-                                                )
-                                            } else {
-                                                NetCover(
-                                                    url = url,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    corner = pageCorner,
-                                                    contentDescription = track.title,
-                                                    maxSize = CoverSize.LARGE.decode,
-                                                )
-                                            }
-                                        }
-                                    }
-                                    else -> Image(
-                                        imageVector = MiuixIcons.Music,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(88.dp),
-                                        colorFilter = ColorFilter.tint(Color.White.copy(alpha = 0.92f)),
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    Text(
+                        text = formatDuration(state.positionMs),
+                        color = PageTextSecondary,
+                        fontSize = 12.sp,
+                    )
+                    Text(
+                        text = formatDuration(track.durationMs),
+                        color = PageTextSecondary,
+                        fontSize = 12.sp,
+                    )
                 }
-            }
-            }
 
-            Spacer(Modifier.height(if (compact) 12.dp else 0.dp))
-
-            val legacyTimeToControls = if (compact) 20.dp else 30.dp
-            val legacyControlsToFunctions = if (compact) 16.dp else 26.dp
-            val progressDownShift =
-                (legacyTimeToControls - PlayerSpacing.TimeToControls) +
-                    (legacyControlsToFunctions - PlayerSpacing.ControlsToFunctions)
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        val e = reveal.controls.coerceIn(0f, 1f)
-                        alpha = e
-                        translationY = (1f - e) * 28.dp.toPx()
-                    },
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-            if (progressDownShift > 0.dp) {
-                Spacer(Modifier.height(progressDownShift))
-            }
-            HyperProgressBar(
-                progress = safeProgress(state.positionMs, track.durationMs),
-                onSeek = { state.seekTo((it * track.durationMs).toLong()) },
-                onSeekFinished = { state.seekTo((it * track.durationMs).toLong()) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = PlayerSpacing.ProgressSideInset),
-            )
-            Spacer(Modifier.height(PlayerSpacing.ProgressToTime))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = PlayerSpacing.ProgressSideInset),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = formatDuration(state.positionMs),
-                    color = PageTextSecondary,
-                    fontSize = 12.sp,
-                )
-                Text(
-                    text = formatDuration(track.durationMs),
-                    color = PageTextSecondary,
-                    fontSize = 12.sp,
-                )
-            }
-
-            Spacer(Modifier.height(PlayerSpacing.TimeToControls))
-
-            val ctrlIcon = 30.dp
-            val ctrlBox = 56.dp * scale
-            val ctrlGap = PlayerSpacing.MainControlGap * scale
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                PageIconButton(
-                    description = "上一首",
-                    iconSize = ctrlIcon,
-                    tint = ControlTint,
-                    boxSize = ctrlBox,
-                    content = { MiuixSkipIcon(isNext = false, tint = ControlTint, size = ctrlIcon) },
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        state.previous()
-                    },
-                )
-                Spacer(Modifier.size(ctrlGap))
-                PlayPauseButton(
-                    isPlaying = state.isPlaying,
-                    buttonSize = 64.dp * scale,
-                    iconSize = 44.dp,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        state.togglePlayPause()
-                    },
-                )
-                Spacer(Modifier.size(ctrlGap))
-                PageIconButton(
-                    description = "下一首",
-                    iconSize = ctrlIcon,
-                    tint = ControlTint,
-                    boxSize = ctrlBox,
-                    content = { MiuixSkipIcon(isNext = true, tint = ControlTint, size = ctrlIcon) },
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        state.next()
-                    },
-                )
-            }
-
-            Spacer(Modifier.height(PlayerSpacing.ControlsToFunctions))
-
-            val fnIcon = 23.dp
-            val fnBox = 44.dp * scale
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = PlayerSpacing.FunctionRowInset),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PlayModeButton(
-                    mode = state.playMode,
-                    boxSize = fnBox,
-                    iconScale = 1f,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        state.cyclePlayMode()
-                    },
-                )
-                PageIconButton(
-                    imageVector = MiuixIcons.Timer,
-                    description = "定时关闭",
-                    iconSize = fnIcon,
-                    tint = ControlTintDim,
-                    boxSize = fnBox,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onOpenSleepTimer()
-                    },
-                )
-                FavoriteButton(
-                    isFavorite = isFavorite,
-                    boxSize = fnBox,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        toggleFavorite()
-                    },
-                )
-                PageIconButton(
-                    imageVector = MiuixIcons.Playlist,
-                    description = "播放列表",
-                    iconSize = 24.dp,
-                    tint = ControlTintDim,
-                    boxSize = fnBox,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onOpenQueue()
-                    },
-                )
-                PageIconButton(
-                    imageVector = MiuixIcons.More,
-                    description = "更多",
-                    iconSize = 22.dp,
-                    tint = ControlTintDim,
-                    boxSize = fnBox,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onMore()
-                    },
-                )
-            }
+                Spacer(Modifier.height(PlayerSpacing.TimeToControls))
             }
         }
+
+        val ctrlIcon = 30.dp
+        val ctrlBox = 56.dp * scale
+        val ctrlGap = PlayerSpacing.MainControlGap * scale
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            AnimatedVisibility(
+                visible = !radioMode,
+                enter = fadeIn(tween(300)) + expandHorizontally(tween(300, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(150)) + shrinkHorizontally(tween(200, easing = FastOutSlowInEasing)),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PageIconButton(
+                        description = "上一首",
+                        iconSize = ctrlIcon,
+                        tint = ControlTint,
+                        boxSize = ctrlBox,
+                        content = { MiuixSkipIcon(isNext = false, tint = ControlTint, size = ctrlIcon) },
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            state.previous()
+                        },
+                    )
+                    Spacer(Modifier.size(ctrlGap))
+                }
+            }
+            PlayPauseButton(
+                isPlaying = state.isPlaying,
+                buttonSize = 64.dp * scale,
+                iconSize = 44.dp,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                    state.togglePlayPause()
+                },
+            )
+            AnimatedVisibility(
+                visible = !radioMode,
+                enter = fadeIn(tween(300)) + expandHorizontally(tween(300, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(150)) + shrinkHorizontally(tween(200, easing = FastOutSlowInEasing)),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.size(ctrlGap))
+                    PageIconButton(
+                        description = "下一首",
+                        iconSize = ctrlIcon,
+                        tint = ControlTint,
+                        boxSize = ctrlBox,
+                        content = { MiuixSkipIcon(isNext = true, tint = ControlTint, size = ctrlIcon) },
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            state.next()
+                        },
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(PlayerSpacing.ControlsToFunctions))
+
+        AnimatedContent(
+            targetState = radioMode,
+            transitionSpec = {
+                fadeIn(tween(320, delayMillis = 60)) togetherWith fadeOut(tween(180))
+            },
+            label = "transportFunctions",
+        ) { radio ->
+            if (radio) {
+                RadioActionsRow(
+                    station = radioStation,
+                    haptic = haptic,
+                    scale = scale,
+                    fetching = fetchingOnline,
+                    onOpenQueue = onOpenQueue,
+                    onSwitchStation = onSwitchStation,
+                    onFetchOnline = onFetchOnline,
+                )
+            } else {
+                val fnIcon = 23.dp
+                val fnBox = 44.dp * scale
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = PlayerSpacing.FunctionRowInset),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PlayModeButton(
+                        mode = state.playMode,
+                        boxSize = fnBox,
+                        iconScale = 1f,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            state.cyclePlayMode()
+                        },
+                    )
+                    PageIconButton(
+                        imageVector = MiuixIcons.Timer,
+                        description = "定时关闭",
+                        iconSize = fnIcon,
+                        tint = ControlTintDim,
+                        boxSize = fnBox,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onOpenSleepTimer()
+                        },
+                    )
+                    FavoriteButton(
+                        isFavorite = isFavorite,
+                        boxSize = fnBox,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onToggleFavorite()
+                        },
+                    )
+                    PageIconButton(
+                        imageVector = MiuixIcons.Playlist,
+                        description = "播放列表",
+                        iconSize = 24.dp,
+                        tint = ControlTintDim,
+                        boxSize = fnBox,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onOpenQueue()
+                        },
+                    )
+                    PageIconButton(
+                        imageVector = MiuixIcons.More,
+                        description = "更多",
+                        iconSize = 22.dp,
+                        tint = ControlTintDim,
+                        boxSize = fnBox,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onMore()
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RadioActionsRow(
+    station: ListenMoeStation,
+    haptic: HapticFeedback,
+    scale: Float,
+    fetching: Boolean,
+    onOpenQueue: () -> Unit,
+    onSwitchStation: () -> Unit,
+    onFetchOnline: () -> Unit,
+) {
+    val box = 44.dp * scale
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PageIconButton(
+            imageVector = MiuixIcons.Playlist,
+            description = "播放队列",
+            iconSize = 22.dp,
+            tint = ControlTintDim,
+            boxSize = box,
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                onOpenQueue()
+            },
+        )
+        Spacer(Modifier.width(14.dp))
+        PageIconButton(
+            imageVector = MiuixIcons.Refresh,
+            description = "切换到${station.other.label}",
+            iconSize = 22.dp,
+            tint = ControlTintDim,
+            boxSize = box,
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                onSwitchStation()
+            },
+        )
+        Spacer(Modifier.width(14.dp))
+        TooltipBox(text = "点击即可切换至在线音源播放该歌曲，有概率不准确") {
+            PageIconButton(
+                imageVector = MiuixIcons.Glass.OpenWithOtherApp,
+                description = "切换至在线音源",
+                iconSize = 22.dp,
+                tint = if (fetching) ControlTintDim.copy(alpha = 0.35f) else ControlTintDim,
+                boxSize = box,
+                onClick = {
+                    if (fetching) return@PageIconButton
+                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                    onFetchOnline()
+                },
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(
+                painter = painterResource(R.drawable.ic_listen_moe),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text = "来自LISTEN.moe",
+                color = PageTextSecondary,
+                fontSize = 13.sp,
+            )
         }
     }
 }
@@ -739,358 +869,12 @@ private fun PlayerTitle(
 }
 
 @Composable
-private fun PlayerRightControls(
-    state: HyperPlayerState,
-    track: PlayerTrack,
-    reveal: PlayerReveal,
-    isFavorite: Boolean,
-    onToggleFavorite: () -> Unit,
-    onOpenQueue: () -> Unit,
-    onMore: () -> Unit,
-    onOpenSleepTimer: () -> Unit,
-    haptic: HapticFeedback,
-    titleCentered: Boolean = true,
-    modifier: Modifier = Modifier,
-    cover: (@Composable () -> Unit)? = null,
-) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-            PlayerTitle(
-                track = track,
-                revealHeader = reveal.header,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-                centered = titleCentered,
-            )
-            cover?.invoke()
-
-            HyperProgressBar(
-                progress = safeProgress(state.positionMs, track.durationMs),
-                onSeek = { state.seekTo((it * track.durationMs).toLong()) },
-                onSeekFinished = { state.seekTo((it * track.durationMs).toLong()) },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = PlayerSpacing.ProgressSideInset),
-            )
-            Spacer(Modifier.height(PlayerSpacing.ProgressToTime))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = PlayerSpacing.ProgressSideInset),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(text = formatDuration(state.positionMs), color = PageTextSecondary, fontSize = 12.sp)
-                Text(text = formatDuration(track.durationMs), color = PageTextSecondary, fontSize = 12.sp)
-            }
-
-            Spacer(Modifier.height(PlayerSpacing.TimeToControls))
-
-            val ctrlIcon = 30.dp
-            val ctrlBox = 56.dp
-            val ctrlGap = PlayerSpacing.MainControlGap
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                PageIconButton(
-                    description = "上一首",
-                    iconSize = ctrlIcon,
-                    tint = ControlTint,
-                    boxSize = ctrlBox,
-                    content = { MiuixSkipIcon(isNext = false, tint = ControlTint, size = ctrlIcon) },
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        state.previous()
-                    },
-                )
-                Spacer(Modifier.size(ctrlGap))
-                PlayPauseButton(
-                    isPlaying = state.isPlaying,
-                    buttonSize = 64.dp,
-                    iconSize = 44.dp,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        state.togglePlayPause()
-                    },
-                )
-                Spacer(Modifier.size(ctrlGap))
-                PageIconButton(
-                    description = "下一首",
-                    iconSize = ctrlIcon,
-                    tint = ControlTint,
-                    boxSize = ctrlBox,
-                    content = { MiuixSkipIcon(isNext = true, tint = ControlTint, size = ctrlIcon) },
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        state.next()
-                    },
-                )
-            }
-
-            Spacer(Modifier.height(PlayerSpacing.ControlsToFunctions))
-
-            val fnIcon = 23.dp
-            val fnBox = 44.dp
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = PlayerSpacing.FunctionRowInset),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PlayModeButton(
-                    mode = state.playMode,
-                    boxSize = fnBox,
-                    iconScale = 1f,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        state.cyclePlayMode()
-                    },
-                )
-                PageIconButton(
-                    imageVector = MiuixIcons.Timer,
-                    description = "定时关闭",
-                    iconSize = fnIcon,
-                    tint = ControlTintDim,
-                    boxSize = fnBox,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onOpenSleepTimer()
-                    },
-                )
-                FavoriteButton(
-                    isFavorite = isFavorite,
-                    boxSize = fnBox,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onToggleFavorite()
-                    },
-                )
-                PageIconButton(
-                    imageVector = MiuixIcons.Playlist,
-                    description = "播放列表",
-                    iconSize = 24.dp,
-                    tint = ControlTintDim,
-                    boxSize = fnBox,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onOpenQueue()
-                    },
-                )
-                PageIconButton(
-                    imageVector = MiuixIcons.More,
-                    description = "更多",
-                    iconSize = 22.dp,
-                    tint = ControlTintDim,
-                    boxSize = fnBox,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onMore()
-                    },
-                )
-            }
-            }
-}
-
-@Composable
-private fun LandscapePlayerUi(
-    state: HyperPlayerState,
-    track: PlayerTrack,
-    reveal: PlayerReveal,
-    isFavorite: Boolean,
-    circular: Boolean,
-    pageCorner: Dp,
-    onToggleFavorite: () -> Unit,
-    onOpenQueue: () -> Unit,
-    onMore: () -> Unit,
-    onOpenSleepTimer: () -> Unit,
-    lyrics: List<LyricLine>,
-    lyricIndex: Int,
-    showLyrics: Boolean,
-    onShowLyricsChange: (Boolean) -> Unit,
-    haptic: HapticFeedback,
-    coverScale: Float,
-    showLyricsTranslation: Boolean,
-    lyricCentered: Boolean,
-    lyricSwitchOnTap: Boolean,
-) {
-    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding().coerceAtLeast(26.dp)
-    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding().coerceAtLeast(16.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(start = 28.dp, end = 28.dp, top = statusTop, bottom = navBottom),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        var swipeProgress by remember { mutableFloatStateOf(0f) }
-        BoxWithConstraints(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .padding(end = 24.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            val coverSize = minOf(maxWidth, maxHeight) * 0.86f
-            Box(
-                modifier = Modifier
-                    .size(coverSize)
-                    .graphicsLayer {
-                        alpha = state.expandProgress.coerceIn(0f, 1f)
-                    }
-
-                    .then(
-                        if (track.hasSong) {
-                            Modifier
-                        } else {
-                            Modifier
-                                .coverFrame(circular, pageCorner)
-                                .background(MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.6f))
-                        }
-                    )
-                    .then(
-                        if (track.hasSong && !lyricSwitchOnTap) {
-                            Modifier.pointerInput(showLyrics) {
-                                val threshold = size.width * 0.14f
-                                detectHorizontalDragGestures(
-                                    onDragStart = { swipeProgress = 0f },
-                                    onDragEnd = { swipeProgress = 0f },
-                                    onDragCancel = { swipeProgress = 0f },
-                                ) { change, dragAmount ->
-                                    change.consume()
-                                    swipeProgress += -dragAmount
-                                    if (!showLyrics && swipeProgress > threshold) {
-                                        swipeProgress = 0f
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onShowLyricsChange(true)
-                                    } else if (showLyrics && swipeProgress < -threshold) {
-                                        swipeProgress = 0f
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onShowLyricsChange(false)
-                                    }
-                                }
-                            }
-                        } else {
-                            Modifier
-                        }
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Crossfade(
-                    targetState = showLyrics,
-                    animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
-                    label = "landCoverLyrics",
-                ) { isLyrics ->
-                    when {
-                        isLyrics && lyrics.isNotEmpty() -> HyperLyricsView(
-                            lines = lyrics,
-                            currentIndex = lyricIndex,
-                            showTranslation = showLyricsTranslation,
-                            centered = lyricCentered,
-                            onSeek = { state.seekTo(it) },
-                            modifier = Modifier.fillMaxSize(),
-                            onDismiss = { onShowLyricsChange(false) },
-                        )
-
-                        isLyrics -> Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .then(
-                                    if (lyricSwitchOnTap) {
-                                        Modifier.clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null,
-                                        ) { onShowLyricsChange(false) }
-                                    } else Modifier
-                                ),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Image(
-                                imageVector = MiuixIcons.Glass.AfterSalesPolicy,
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp),
-                                colorFilter = ColorFilter.tint(PageTextSecondary.copy(alpha = 0.7f)),
-                            )
-                            Spacer(Modifier.height(14.dp))
-                            Text(
-                                text = "没有歌词",
-                                color = PageTextSecondary,
-                                fontSize = 15.sp,
-                            )
-                        }
-
-                        track.hasSong -> Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .scale(coverScale)
-                                .coverFrame(circular, pageCorner)
-                                .saveCoverOnLongPress(
-                                    url = track.coverUrl,
-                                    name = track.title,
-                                    onTap = if (lyricSwitchOnTap) {
-                                        {
-                                            haptic.performHapticFeedback(
-                                                HapticFeedbackType.TextHandleMove
-                                            )
-                                            onShowLyricsChange(true)
-                                        }
-                                    } else null,
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            val url = track.coverUrl ?: ""
-                            if (url.isBlank()) {
-                                Image(
-                                    imageVector = MiuixIcons.Music,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(88.dp),
-                                    colorFilter = ColorFilter.tint(Color.White.copy(alpha = 0.92f)),
-                                )
-                            } else {
-                                NetCover(
-                                    url = url,
-                                    modifier = Modifier.fillMaxSize(),
-                                    corner = pageCorner,
-                                    contentDescription = track.title,
-                                    maxSize = CoverSize.LARGE.decode,
-                                )
-                            }
-                        }
-
-                        else -> Image(
-                            imageVector = MiuixIcons.Music,
-                            contentDescription = null,
-                            modifier = Modifier.size(88.dp),
-                            colorFilter = ColorFilter.tint(Color.White.copy(alpha = 0.92f)),
-                        )
-                    }
-                }
-            }
-        }
-
-        PlayerRightControls(
-            state = state,
-            track = track,
-            reveal = reveal,
-            isFavorite = isFavorite,
-            onToggleFavorite = onToggleFavorite,
-            onOpenQueue = onOpenQueue,
-            onMore = onMore,
-            onOpenSleepTimer = onOpenSleepTimer,
-            haptic = haptic,
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-        )
-    }
-}
-
-@Composable
 private fun PlayPauseButton(
     isPlaying: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    buttonSize: androidx.compose.ui.unit.Dp = 64.dp,
-    iconSize: androidx.compose.ui.unit.Dp = 44.dp,
+    buttonSize: Dp = 64.dp,
+    iconSize: Dp = 44.dp,
 ) {
     val progress by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
@@ -1258,7 +1042,6 @@ private fun PageIconButton(
     iconSize: Dp,
     modifier: Modifier = Modifier,
     imageVector: androidx.compose.ui.graphics.vector.ImageVector? = null,
-    painter: androidx.compose.ui.graphics.painter.Painter? = null,
     content: (@Composable () -> Unit)? = null,
     boxSize: Dp = 44.dp,
     tint: Color = ControlTint,
@@ -1274,14 +1057,10 @@ private fun PageIconButton(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        when {
-            content != null -> content()
-            painter != null -> Image(
-                painter = painter,
-                contentDescription = description,
-                modifier = Modifier.size(iconSize),
-            )
-            else -> Image(
+        if (content != null) {
+            content()
+        } else {
+            Image(
                 imageVector = requireNotNull(imageVector),
                 contentDescription = description,
                 modifier = Modifier.size(iconSize),
@@ -1299,7 +1078,7 @@ private fun HyperProgressBar(
     modifier: Modifier = Modifier,
 ) {
     var scrubbing by remember { mutableStateOf(false) }
-    var scrubValue by remember { mutableFloatStateOf(0f) }
+    var scrubValue by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var pending by remember { mutableStateOf<Float?>(null) }
     LaunchedEffect(progress, pending) {
         val target = pending ?: return@LaunchedEffect
@@ -1321,6 +1100,8 @@ private fun HyperProgressBar(
         pending != null -> pending!!
         else -> if (progress.isNaN() || progress.isInfinite()) 0f else progress.coerceIn(0f, 1f)
     }
+    val trackColor = PageTextPrimary.copy(alpha = 0.30f)
+    val playedColor = PageTextPrimary
 
     Box(
         modifier = modifier
@@ -1356,7 +1137,7 @@ private fun HyperProgressBar(
                 val top = (size.height - trackHeight) / 2f
 
                 drawRoundRect(
-                    color = Color.White.copy(alpha = 0.30f),
+                    color = trackColor,
                     topLeft = Offset(0f, top),
                     size = Size(size.width, trackHeight),
                     cornerRadius = radius,
@@ -1365,7 +1146,7 @@ private fun HyperProgressBar(
                 val playedWidth = size.width * shown
                 if (playedWidth > 0f) {
                     drawRoundRect(
-                        color = Color.White,
+                        color = playedColor,
                         topLeft = Offset(0f, top),
                         size = Size(playedWidth.coerceAtLeast(trackHeight), trackHeight),
                         cornerRadius = radius,
@@ -1393,35 +1174,3 @@ private fun <S> androidx.compose.animation.AnimatedContentTransitionScope<S>.pla
         fadeOut(tween(120, delayMillis = 20, easing = LinearEasing)) +
             scaleOut(tween(140, easing = LinearOutSlowInEasing), targetScale = 0.5f),
     )
-
-@Composable
-private fun NoLyricsHint(onBack: (() -> Unit)? = null) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .then(
-                if (onBack != null) {
-                    Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onBack,
-                    )
-                } else Modifier
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Image(
-            imageVector = MiuixIcons.Glass.AfterSalesPolicy,
-            contentDescription = null,
-            modifier = Modifier.size(48.dp),
-            colorFilter = ColorFilter.tint(PageTextSecondary.copy(alpha = 0.7f)),
-        )
-        Spacer(Modifier.height(14.dp))
-        Text(
-            text = "没有歌词",
-            color = PageTextSecondary,
-            fontSize = 15.sp,
-        )
-    }
-}

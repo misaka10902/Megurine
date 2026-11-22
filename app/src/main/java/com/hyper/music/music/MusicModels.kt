@@ -10,10 +10,13 @@ data class Song(
     val durationMs: Long = 0L,
     val source: String = "netease",
     val cover: String = "",
+    val artistIds: List<String> = emptyList(),
+    val popularity: Int = 0,
 
     val localUri: String = "",
 ) {
     val isLocal: Boolean get() = localUri.isNotBlank()
+    val isBili: Boolean get() = source == BiliApi.SOURCE
     val artistText: String get() = artists.joinToString(" / ").ifBlank { "未知艺术家" }
     val albumText: String get() = album.ifBlank { "未知专辑" }
     val subtitle: String get() = "$artistText · $albumText"
@@ -45,6 +48,7 @@ data class Playlist(
     val name: String,
     val songs: List<Song> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
+    val cover: String = "",
 )
 
 enum class AudioQuality(val br: Int, val label: String, val bitrateText: String) {
@@ -59,23 +63,29 @@ data class MusicSettings(
     val quality: AudioQuality = AudioQuality.HIGH,
     val volume: Float = 1f,
     val playbackSpeed: Float = 1f,
+    val autoResume: Boolean = false,
     val coverCornerRadius: Float = 12f,
 
     val coverCircular: Boolean = true,
     val lyricCentered: Boolean = true,
 
     val lyricSwitchOnTap: Boolean = false,
+    val playerBackground: String = "blur",
+    val flowStyle: String = "system",
     val lyricFontSize: Float = 20f,
 
     val lyricFontWeight: Int = 500,
     val titleCentered: Boolean = true,
     val showLyricsTranslation: Boolean = true,
+    val showLyricRoman: Boolean = false,
 
     val playBarLyrics: Boolean = false,
     val advancedMaterial: Boolean = true,
     val audioFade: Boolean = true,
     val liveLyric: Boolean = false,
     val audioFocus: Boolean = false,
+    val biliEnabled: Boolean = true,
+    val biliKeywords: String = "高品质 原曲",
     val downloadQuality: AudioQuality = AudioQuality.STANDARD,
     val downloadMetadata: Boolean = true,
     val downloadPath: String = DEFAULT_DOWNLOAD_PATH,
@@ -84,6 +94,7 @@ data class MusicSettings(
     companion object {
         const val DEFAULT_API_BASE = "https://music-api.gdstudio.xyz/api.php"
         const val DEFAULT_DOWNLOAD_PATH = "/storage/emulated/0/Music/"
+        const val DEFAULT_BILI_KEYWORDS = "高品质 原曲"
         val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.5f, 2f)
         val PLAYBACK_SPEED_LABELS = listOf("0.5×", "0.75×", "1×", "1.5×", "2×")
     }

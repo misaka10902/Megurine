@@ -22,7 +22,6 @@ fun rememberWindowSizeDp(): WindowSizeDp {
 fun isCompactWindow(size: WindowSizeDp): Boolean =
     size.width > size.height || size.height < 600.dp
 
-
 @ReadOnlyComposable
 fun isLargeScreen(size: WindowSizeDp): Boolean = false
 

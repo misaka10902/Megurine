@@ -160,7 +160,7 @@ fun HyperMiniPlayer(
                     },
                     onDragEnd = {
                         val commitPx = size.width * SwipeCommitFraction
-                        val canChange = state.track.hasSong
+                        val canChange = state.track.hasSong && !PlaybackController.isRadio()
                         scope.launch {
                             when {
                                 canChange && dragTotal < -commitPx -> {

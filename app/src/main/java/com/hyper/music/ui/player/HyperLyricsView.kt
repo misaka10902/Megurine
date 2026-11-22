@@ -46,6 +46,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hyper.music.music.LyricLine
@@ -74,7 +75,8 @@ fun HyperLyricsView(
     centered: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    onDismiss: () -> Unit = {},
+    horizontalInset: Dp? = null,
+    onDismiss: (() -> Unit)? = null,
 ) {
     val settings by MusicLibrary.settings.collectAsState()
     val playback by PlaybackController.state.collectAsState()
@@ -82,7 +84,6 @@ fun HyperLyricsView(
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = currentIndex.coerceIn(0, lines.lastIndex.coerceAtLeast(0)),
     )
-
 
     var isUserBrowsing by remember(lines) { mutableStateOf(false) }
     var positioned by remember(lines) { mutableStateOf(false) }
@@ -119,7 +120,6 @@ fun HyperLyricsView(
         }
     }
 
-
     LaunchedEffect(isManualScrolling, isUserBrowsing, playback.isPlaying) {
         if (!playback.isPlaying || isManualScrolling || !isUserBrowsing) return@LaunchedEffect
         delay(FOLLOW_RESUME_DELAY_MS)
@@ -128,7 +128,6 @@ fun HyperLyricsView(
             followResumeKey++
         }
     }
-
 
     LaunchedEffect(currentIndex, lines, followResumeKey) {
         if (currentIndex < 0 || lines.isEmpty()) return@LaunchedEffect
@@ -140,7 +139,6 @@ fun HyperLyricsView(
 
         val info = listState.layoutInfo
         val target = info.visibleItemsInfo.firstOrNull { it.index == currentIndex }
-
 
         if (!positioned) {
             scrollInCode.value = true
@@ -177,7 +175,6 @@ fun HyperLyricsView(
         }
     }
 
-
     val blurEnabled = playback.isPlaying && settings.advancedMaterial && !isUserBrowsing
 
     BoxWithConstraints(modifier = modifier.fillMaxSize().then(browsingModifier)) {
@@ -190,7 +187,7 @@ fun HyperLyricsView(
             ) {
                 Text(
                     text = "暂无歌词",
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = PlayerPagePalette.primary.copy(alpha = 0.6f),
                     fontSize = 17.sp,
                     textAlign = TextAlign.Center,
                 )
@@ -202,7 +199,8 @@ fun HyperLyricsView(
                 0.86f to Color.Black,
                 1f to Color.Transparent,
             )
-            val sideInset = if (centered) LyricsInnerPadding else maxWidth * (1f - CoverSizeFraction) / 2f
+            val sideInset = horizontalInset
+                ?: if (centered) LyricsInnerPadding else maxWidth * (1f - CoverSizeFraction) / 2f
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -255,9 +253,15 @@ private fun LyricRow(
     baseFontSize: Float,
     blurEnabled: Boolean,
     onSeek: (Long) -> Unit,
-    onDismiss: () -> Unit,
+    onDismiss: (() -> Unit)?,
 ) {
-    val hasTranslation = showTranslation && line.translation.isNotBlank()
+    val weightSettings by MusicLibrary.settings.collectAsState()
+    val secondary = if (weightSettings.showLyricRoman && line.roman.isNotBlank()) {
+        line.roman
+    } else {
+        line.translation
+    }
+    val hasTranslation = showTranslation && secondary.isNotBlank()
 
     val targetAlpha = if (isCurrent) 1f else when (distance) {
         1 -> 0.58f
@@ -290,7 +294,6 @@ private fun LyricRow(
     val translationSize = (baseFontSize * 0.81f + focus).sp
     val mainLineHeight = (baseFontSize * 1.43f).sp
     val translationLineHeight = (baseFontSize * 1.14f).sp
-    val weightSettings by MusicLibrary.settings.collectAsState()
     val baseWeight = weightSettings.lyricFontWeight
     val fontWeight = FontWeight((baseWeight + if (focus > 0.5f) 100 else 0).coerceAtMost(900))
     val translationWeight = FontWeight((baseWeight - 100).coerceAtLeast(300))
@@ -302,7 +305,7 @@ private fun LyricRow(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) {
-                if (isCurrent) onDismiss() else onSeek(line.timeMs)
+                if (isCurrent) onDismiss?.invoke() else onSeek(line.timeMs)
             }
             .padding(vertical = 12.dp)
             .then(if (blurEnabled) Modifier.blur(blurDp) else Modifier),
@@ -315,7 +318,7 @@ private fun LyricRow(
         if (line.text.isNotBlank()) {
             Text(
                 text = line.text,
-                color = Color.White.copy(alpha = alpha),
+                color = PlayerPagePalette.primary.copy(alpha = alpha),
                 fontSize = fontSize,
                 fontWeight = fontWeight,
                 textAlign = align,
@@ -327,8 +330,8 @@ private fun LyricRow(
         if (hasTranslation && line.text.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
             Text(
-                text = line.translation,
-                color = Color.White.copy(alpha = alpha * 0.78f),
+                text = secondary,
+                color = PlayerPagePalette.primary.copy(alpha = alpha * 0.78f),
                 fontSize = translationSize,
                 fontWeight = translationWeight,
                 textAlign = align,

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
+import android.os.Looper
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -25,6 +26,7 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.amr.AmrExtractor
 import androidx.media3.extractor.flac.FlacExtractor
 import androidx.media3.extractor.mp3.Mp3Extractor
+import androidx.media3.extractor.mp4.FragmentedMp4Extractor
 import androidx.media3.extractor.mp4.Mp4Extractor
 import androidx.media3.extractor.text.SubtitleParser
 import androidx.media3.extractor.ogg.OggExtractor
@@ -45,6 +47,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -57,12 +61,14 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        setMediaNotificationProvider(IslandShareNotificationProvider(this))
 
         val mediaSourceFactory = ProgressiveMediaSource.Factory(
             MediaCache.dataSourceFactory(this),
             ExtractorsFactory {
                 arrayOf(
                     Mp3Extractor(),
+                    FragmentedMp4Extractor(),
                     Mp4Extractor(SubtitleParser.Factory.UNSUPPORTED),
                     FlacExtractor(),
                     OggExtractor(),
@@ -107,16 +113,35 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-        session = MediaSession.Builder(this, exo)
+        val radioPlayer = RadioSessionPlayer(exo)
+        val mainHandler = Handler(Looper.getMainLooper())
+        ListenMoeController.onSessionInvalidate = { mainHandler.post { radioPlayer.refresh() } }
+
+        session = MediaSession.Builder(this, radioPlayer)
             .setSessionActivity(openApp)
             .setCallback(HyperMediaSessionCallback())
             .build()
 
         updateCustomLayout()
         serviceScope.launch {
-            combine(PlaybackController.state, MusicLibrary.favorites) { st, fav ->
+            while (isActive) {
+                delay(1_000)
+                if (ListenMoeController.state.value.active) radioPlayer.refresh()
+            }
+        }
+        serviceScope.launch {
+            combine(
+                PlaybackController.state,
+                MusicLibrary.favorites,
+                ListenMoeController.state,
+            ) { st, fav, radio ->
                 val id = st.song?.id
-                Triple(st.mode, id, if (id == null) false else fav.any { it.id == id })
+                RadioLayoutKey(
+                    mode = st.mode,
+                    songId = id,
+                    liked = id != null && fav.any { it.id == id },
+                    radio = radio.active,
+                )
             }.distinctUntilChanged().collect { updateCustomLayout() }
         }
 
@@ -125,6 +150,7 @@ class PlaybackService : MediaSessionService() {
 
     @Suppress("DEPRECATION")
     private fun buildCustomLayout(): List<CommandButton> {
+        if (ListenMoeController.state.value.active) return emptyList()
         val state = PlaybackController.state.value
         val songId = state.song?.id
         val liked = songId != null && MusicLibrary.isFavorite(songId)
@@ -187,6 +213,9 @@ class PlaybackService : MediaSessionService() {
             controller: MediaSession.ControllerInfo,
             command: Int,
         ): Int {
+            if (ListenMoeController.state.value.active && command in RADIO_BLOCKED_COMMANDS) {
+                return SessionResult.RESULT_INFO_SKIPPED
+            }
             if (command == Player.COMMAND_PLAY_PAUSE) {
                 if (session.player.isPlaying) {
                     PlaybackController.pause()
@@ -228,6 +257,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         serviceScope.cancel()
+        ListenMoeController.onSessionInvalidate = null
         PlaybackController.detach()
         session?.run {
             player.release()
@@ -241,7 +271,27 @@ class PlaybackService : MediaSessionService() {
     companion object {
         private const val ACTION_CYCLE_MODE = "com.hyper.music.CYCLE_MODE"
         private const val ACTION_TOGGLE_FAVORITE = "com.hyper.music.TOGGLE_FAVORITE"
+
+        private val RADIO_BLOCKED_COMMANDS = setOf(
+            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_NEXT,
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_PREVIOUS,
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_MEDIA_ITEM,
+            Player.COMMAND_SEEK_BACK,
+            Player.COMMAND_SEEK_FORWARD,
+            Player.COMMAND_SET_REPEAT_MODE,
+            Player.COMMAND_SET_SHUFFLE_MODE,
+        )
     }
+
+    private data class RadioLayoutKey(
+        val mode: PlayMode,
+        val songId: String?,
+        val liked: Boolean,
+        val radio: Boolean,
+    )
 }
 
 private class AudioOnlyRenderersFactory(private val context: Context) : RenderersFactory {

@@ -23,6 +23,8 @@ object MusicLibrary {
     private const val KEY_COVER_CIRCLE = "cover_circle"
     private const val KEY_LYRIC_CENTERED = "lyric_centered"
     private const val KEY_LYRIC_SWITCH_TAP = "lyric_switch_tap"
+    private const val KEY_PLAYER_BACKGROUND = "player_background"
+    private const val KEY_FLOW_STYLE = "flow_style"
     private const val KEY_LYRIC_FONT_SIZE = "lyric_font_size"
     private const val KEY_LYRIC_FONT_WEIGHT = "lyric_font_weight"
     private const val KEY_TITLE_CENTERED = "title_centered"
@@ -33,6 +35,10 @@ object MusicLibrary {
     private const val KEY_AUDIO_FADE = "audio_fade"
     private const val KEY_LIVE_LYRIC = "live_lyric"
     private const val KEY_AUDIO_FOCUS = "audio_focus"
+    private const val KEY_AUTO_RESUME = "auto_resume"
+    private const val KEY_SHOW_LYRIC_ROMAN = "show_lyric_roman"
+    private const val KEY_BILI_ENABLED = "bili_enabled"
+    private const val KEY_BILI_KEYWORDS = "bili_keywords"
     private const val KEY_DOWNLOAD_QUALITY = "download_quality"
     private const val KEY_DOWNLOAD_METADATA = "download_metadata"
     private const val KEY_DOWNLOAD_PATH = "download_path"
@@ -77,6 +83,8 @@ object MusicLibrary {
             coverCircular = prefs.getBoolean(KEY_COVER_CIRCLE, true),
             lyricCentered = prefs.getBoolean(KEY_LYRIC_CENTERED, true),
             lyricSwitchOnTap = prefs.getBoolean(KEY_LYRIC_SWITCH_TAP, false),
+            playerBackground = prefs.getString(KEY_PLAYER_BACKGROUND, "blur") ?: "blur",
+            flowStyle = prefs.getString(KEY_FLOW_STYLE, "system") ?: "system",
             lyricFontSize = prefs.getFloat(KEY_LYRIC_FONT_SIZE, 20f).coerceIn(14f, 36f),
             lyricFontWeight = prefs.getInt(KEY_LYRIC_FONT_WEIGHT, 500).coerceIn(300, 900),
             titleCentered = prefs.getBoolean(KEY_TITLE_CENTERED, true),
@@ -86,6 +94,11 @@ object MusicLibrary {
             audioFade = prefs.getBoolean(KEY_AUDIO_FADE, true),
             liveLyric = prefs.getBoolean(KEY_LIVE_LYRIC, false),
             audioFocus = prefs.getBoolean(KEY_AUDIO_FOCUS, false),
+            autoResume = prefs.getBoolean(KEY_AUTO_RESUME, false),
+            showLyricRoman = prefs.getBoolean(KEY_SHOW_LYRIC_ROMAN, false),
+            biliEnabled = prefs.getBoolean(KEY_BILI_ENABLED, true),
+            biliKeywords = prefs.getString(KEY_BILI_KEYWORDS, null)
+                ?.takeIf { it.isNotBlank() } ?: MusicSettings.DEFAULT_BILI_KEYWORDS,
             downloadQuality = AudioQuality.entries.firstOrNull {
                 it.br == prefs.getInt(KEY_DOWNLOAD_QUALITY, 128)
             } ?: AudioQuality.STANDARD,
@@ -154,6 +167,16 @@ object MusicLibrary {
         prefs.edit().putBoolean(KEY_LYRIC_SWITCH_TAP, onTap).apply()
     }
 
+    fun setPlayerBackground(mode: String) {
+        _settings.value = _settings.value.copy(playerBackground = mode)
+        prefs.edit().putString(KEY_PLAYER_BACKGROUND, mode).apply()
+    }
+
+    fun setFlowStyle(style: String) {
+        _settings.value = _settings.value.copy(flowStyle = style)
+        prefs.edit().putString(KEY_FLOW_STYLE, style).apply()
+    }
+
     fun setLyricCentered(centered: Boolean) {
         _settings.value = _settings.value.copy(lyricCentered = centered)
         prefs.edit().putBoolean(KEY_LYRIC_CENTERED, centered).apply()
@@ -190,6 +213,27 @@ object MusicLibrary {
     fun setAudioFocus(enabled: Boolean) {
         _settings.value = _settings.value.copy(audioFocus = enabled)
         prefs.edit().putBoolean(KEY_AUDIO_FOCUS, enabled).apply()
+    }
+
+    fun setAutoResume(enabled: Boolean) {
+        _settings.value = _settings.value.copy(autoResume = enabled)
+        prefs.edit().putBoolean(KEY_AUTO_RESUME, enabled).apply()
+    }
+
+    fun setShowLyricRoman(enabled: Boolean) {
+        _settings.value = _settings.value.copy(showLyricRoman = enabled)
+        prefs.edit().putBoolean(KEY_SHOW_LYRIC_ROMAN, enabled).apply()
+    }
+
+    fun setBiliEnabled(enabled: Boolean) {
+        _settings.value = _settings.value.copy(biliEnabled = enabled)
+        prefs.edit().putBoolean(KEY_BILI_ENABLED, enabled).apply()
+    }
+
+    fun setBiliKeywords(keywords: String) {
+        val normalized = keywords.trim().ifBlank { MusicSettings.DEFAULT_BILI_KEYWORDS }
+        _settings.value = _settings.value.copy(biliKeywords = normalized)
+        prefs.edit().putString(KEY_BILI_KEYWORDS, normalized).apply()
     }
 
     fun setAdvancedMaterial(enabled: Boolean) {
@@ -232,6 +276,22 @@ object MusicLibrary {
         prefs.edit().remove(KEY_HISTORY).apply()
     }
 
+    fun replaceAll(
+        playlists: List<Playlist>,
+        favorites: List<Song>,
+        history: List<Song>,
+    ) {
+        val trimmed = history.take(MAX_HISTORY)
+        _playlists.value = playlists
+        _favorites.value = favorites
+        _history.value = trimmed
+        prefs.edit()
+            .putString(KEY_PLAYLISTS, encodePlaylists(playlists))
+            .putString(KEY_FAVORITES, encodeSongs(favorites))
+            .putString(KEY_HISTORY, encodeSongs(trimmed))
+            .apply()
+    }
+
     fun removeByLocalUri(uris: Set<String>) {
         if (uris.isEmpty()) return
         val matched: (Song) -> Boolean = { it.isLocal && it.localUri in uris }
@@ -269,17 +329,23 @@ object MusicLibrary {
         val mode: PlayMode,
     )
 
-    fun saveSession(songs: List<Song>, index: Int, positionMs: Long, mode: PlayMode) {
+    fun saveSession(
+        songs: List<Song>,
+        index: Int,
+        positionMs: Long,
+        mode: PlayMode,
+        blocking: Boolean = false,
+    ) {
         if (songs.isEmpty()) {
             clearSession()
             return
         }
-        prefs.edit()
+        val editor = prefs.edit()
             .putString(KEY_SESSION_QUEUE, encodeSongs(songs))
             .putInt(KEY_SESSION_INDEX, index)
             .putLong(KEY_SESSION_POSITION, positionMs)
             .putString(KEY_SESSION_MODE, mode.name)
-            .apply()
+        if (blocking) editor.commit() else editor.apply()
     }
 
     fun loadSession(): SavedSession? {
@@ -349,6 +415,14 @@ object MusicLibrary {
         return playlist
     }
 
+    fun setPlaylistCover(id: String, cover: String) {
+        val list = _playlists.value.map {
+            if (it.id == id) it.copy(cover = cover) else it
+        }
+        _playlists.value = list
+        persistPlaylists(list)
+    }
+
     fun renamePlaylist(id: String, name: String) {
         val list = _playlists.value.map {
             if (it.id == id) it.copy(name = name.trim().ifBlank { it.name }) else it
@@ -363,6 +437,16 @@ object MusicLibrary {
         persistPlaylists(list)
     }
 
+    fun deletePlaylists(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        val removed = ids.toSet()
+        val current = _playlists.value
+        val list = current.filterNot { it.id in removed }
+        if (list.size == current.size) return
+        _playlists.value = list
+        persistPlaylists(list)
+    }
+
     fun addSongToPlaylist(playlistId: String, song: Song): Boolean {
         var added = false
         val list = _playlists.value.map { p ->
@@ -372,6 +456,25 @@ object MusicLibrary {
             } else p
         }
         if (added) {
+            _playlists.value = list
+            persistPlaylists(list)
+        }
+        return added
+    }
+
+    fun addSongsToPlaylist(playlistId: String, songs: List<Song>): Int {
+        if (songs.isEmpty()) return 0
+        var added = 0
+        val list = _playlists.value.map { p ->
+            if (p.id != playlistId) return@map p
+            val existing = p.songs.mapTo(HashSet()) { it.id }
+            val fresh = songs.filter { existing.add(it.id) }
+            if (fresh.isEmpty()) p else {
+                added = fresh.size
+                p.copy(songs = p.songs + fresh)
+            }
+        }
+        if (added > 0) {
             _playlists.value = list
             persistPlaylists(list)
         }
@@ -440,6 +543,7 @@ object MusicLibrary {
                     put("id", p.id)
                     put("name", p.name)
                     put("createdAt", p.createdAt)
+                    if (p.cover.isNotBlank()) put("cover", p.cover)
                     put("songs", JSONArray().also { a -> p.songs.forEach { a.put(it.toJson()) } })
                 }
             )
@@ -463,6 +567,7 @@ object MusicLibrary {
                     name = o.optString("name"),
                     songs = songs,
                     createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                    cover = o.optString("cover").orEmpty(),
                 )
             }
         }.getOrDefault(emptyList())
@@ -480,12 +585,17 @@ internal fun Song.toJson(): JSONObject = JSONObject().apply {
     put("source", source)
     put("cover", cover)
     put("localUri", localUri)
+    if (artistIds.isNotEmpty()) put("artistIds", JSONArray().also { a -> artistIds.forEach { a.put(it) } })
+    if (popularity != 0) put("popularity", popularity)
 }
 
 internal fun songFromJson(o: JSONObject): Song {
     val artistsArr = o.optJSONArray("artists")
     val artists = if (artistsArr == null) emptyList() else
         (0 until artistsArr.length()).mapNotNull { artistsArr.optString(it).ifBlank { null } }
+    val artistIdsArr = o.optJSONArray("artistIds")
+    val artistIds = if (artistIdsArr == null) emptyList() else
+        (0 until artistIdsArr.length()).mapNotNull { artistIdsArr.optString(it).ifBlank { null } }
     return Song(
         id = o.optString("id"),
         name = o.optString("name"),
@@ -496,6 +606,8 @@ internal fun songFromJson(o: JSONObject): Song {
         durationMs = o.optLong("duration", 0L),
         source = o.optString("source", "netease").ifBlank { "netease" },
         cover = o.optString("cover"),
+        artistIds = artistIds,
+        popularity = o.optInt("popularity", 0),
         localUri = o.optString("localUri"),
     )
 }

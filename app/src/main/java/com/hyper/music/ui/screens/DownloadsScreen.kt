@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +65,7 @@ fun DownloadsScreen(
     var loading by remember { mutableStateOf(true) }
     var refreshKey by remember { mutableIntStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
+    val localRevision by LocalSongs.revision.collectAsState()
 
     val readPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -81,7 +83,7 @@ fun DownloadsScreen(
         }
     }
 
-    LaunchedEffect(refreshKey, refreshSignal) {
+    LaunchedEffect(refreshKey, refreshSignal, localRevision) {
         loading = true
         songs = LocalSongs.scan(context)
         loading = false
@@ -154,7 +156,6 @@ fun DownloadsScreen(
         header = {
 
         },
-
 
         pullRefresh = PullRefreshSpec(
             isRefreshing = refreshing,

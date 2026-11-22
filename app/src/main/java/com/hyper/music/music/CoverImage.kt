@@ -21,20 +21,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.glass.OverseasMusic
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 object CoverLoader {
+
+    private const val DISK_MAX_BYTES = 128L * 1024 * 1024
 
     private val memory = object : LruCache<String, ImageBitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: ImageBitmap): Int =
@@ -73,6 +76,24 @@ object CoverLoader {
         pinnedCache.clear()
     }
 
+    fun clearMemory() {
+        memory.evictAll()
+        pinnedCache.clear()
+        resolved.clear()
+    }
+
+    fun clearDisk() {
+        AppCache.deleteDir(diskDir())
+    }
+
+    fun trimMemory() {
+        memory.evictAll()
+    }
+
+    fun trimResolved() {
+        resolved.clear()
+    }
+
     private fun key(url: String, maxSize: Int): String = "$url@$maxSize"
 
     private suspend fun resolveApiPic(url: String): String? {
@@ -95,21 +116,46 @@ object CoverLoader {
         if (url.startsWith("file://") || url.startsWith("content://") || url.startsWith("/")) {
             return decodeLocal(url, maxSize)
         }
-        var conn: HttpURLConnection? = null
-        return try {
-            conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 10_000
-                readTimeout = 15_000
-                instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
-            }
-            if (conn.responseCode !in 200..299) return null
-            val bytes = conn.inputStream.use { it.readBytes() }
-            decodeBytes(bytes, maxSize)
-        } catch (_: Throwable) {
+        val file = diskFile(url)
+        val cached = if (file.isFile && file.length() > 0L) {
+            runCatching { file.readBytes() }.getOrNull()
+        } else {
             null
-        } finally {
-            conn?.disconnect()
+        }
+        val bytes = cached ?: HttpClient.bytes(
+            url, 10_000, 15_000,
+            mapOf("User-Agent" to "Mozilla/5.0 (Linux; Android 14)"),
+        )?.also { data ->
+            runCatching { file.writeBytes(data) }
+            pruneDisk()
+        } ?: return null
+        return decodeBytes(bytes, maxSize)
+    }
+
+    private fun diskFile(url: String): java.io.File {
+        val dir = diskDir()
+        val digest = java.security.MessageDigest.getInstance("MD5").digest(url.toByteArray())
+        val name = buildString {
+            digest.forEach { b -> append(((b.toInt() and 0xff) + 0x100).toString(16).substring(1)) }
+        }
+        return java.io.File(dir, name)
+    }
+
+    private fun diskDir(): java.io.File =
+        java.io.File(com.hyper.music.HyperApp.instance.cacheDir, "cover_cache")
+            .apply { if (!exists()) mkdirs() }
+
+    private fun pruneDisk() {
+        runCatching {
+            val files = diskDir().listFiles()?.sortedBy { it.lastModified() } ?: return
+            var total = files.sumOf { it.length() }
+            var count = files.size
+            for (f in files) {
+                if (count <= 384 && total <= DISK_MAX_BYTES) break
+                total -= f.length()
+                count -= 1
+                f.delete()
+            }
         }
     }
 
@@ -180,15 +226,17 @@ fun NetCover(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(radius))
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        androidx.compose.ui.graphics.Color(0xFF2A2A2E),
-                        androidx.compose.ui.graphics.Color(0xFF3A3A40),
-                    )
-                )
-            ),
+            .background(MiuixTheme.colorScheme.secondaryContainer),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
     ) {
+        Icon(
+            imageVector = MiuixIcons.Glass.OverseasMusic,
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize(0.46f)
+                .graphicsLayer { alpha = 1f - coverAlpha.value },
+            tint = MiuixTheme.colorScheme.onSurfaceSecondary.copy(alpha = 0.6f),
+        )
         image?.let {
             Image(
                 bitmap = it,

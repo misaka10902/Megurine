@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 覆盖 media3 的 media3_icon_circular_play：白色 Music1 剪影（通知 / 媒体控件用）。
-     坐标与 miuix 的 buildHyperOSIcon 一致：viewport 1333.33，group 里 scaleY=-1 翻转 Y 轴。 -->
+
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="192dp"
     android:height="192dp"

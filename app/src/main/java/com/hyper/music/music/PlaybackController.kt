@@ -47,8 +47,11 @@ object PlaybackController {
 
     private var queue: List<Song> = emptyList()
 
-    private var liveLyricLines: List<LyricLine> = emptyList()
+    @Volatile private var radioActive = false
+    private var radioOffsetMs = 0L
+    private var radioWasPlaying = false
 
+    private var liveLyricLines: List<LyricLine> = emptyList()
 
     private val _playBarLyric = MutableStateFlow("")
     val playBarLyric: StateFlow<String> = _playBarLyric
@@ -78,13 +81,22 @@ object PlaybackController {
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             sync()
-            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
+            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT && !radioActive) {
                 _state.value.song?.let { MusicLibrary.addHistory(it) }
             }
         }
 
         override fun onPlayerError(error: PlaybackException) {
             _state.update { it.copy(error = error.message ?: "播放失败", isLoading = false) }
+            if (radioActive) {
+                scope.launch {
+                    delay(2500)
+                    if (radioActive) player?.let { p ->
+                        p.prepare()
+                        p.play()
+                    }
+                }
+            }
         }
 
         override fun onPositionDiscontinuity(
@@ -110,12 +122,15 @@ object PlaybackController {
         (exo as? ExoPlayer)?.setAudioAttributes(audioAttributes(), false)
         applyMode(exo, _state.value.mode)
         restoreSession(exo)
+        if (radioActive) startRadio(ListenMoeController.state.value.station)
         sync()
         startTicker()
     }
 
     fun detach() {
         saveSession()
+        ListenMoeController.exit()
+        radioActive = false
         AudioFocusMonitor.onPlaybackIntentChanged(false)
         player?.removeListener(listener)
         player = null
@@ -128,17 +143,18 @@ object PlaybackController {
 
     fun isAttached(): Boolean = player != null
 
-    fun saveSession() {
+    fun saveSession(blocking: Boolean = false) {
+        if (radioActive) return
         val songs = queue
         if (songs.isEmpty()) return
         val p = player
         val index = (p?.currentMediaItemIndex ?: _state.value.index).coerceIn(0, songs.lastIndex)
         val position = (p?.currentPosition ?: _state.value.positionMs).coerceAtLeast(0L)
-        MusicLibrary.saveSession(songs, index, position, _state.value.mode)
+        MusicLibrary.saveSession(songs, index, position, _state.value.mode, blocking)
     }
 
     private fun restoreSession(p: Player) {
-        if (queue.isNotEmpty()) return
+        if (queue.isNotEmpty() || radioActive) return
         val saved = MusicLibrary.loadSession() ?: return
         if (saved.songs.isEmpty()) return
         val index = saved.index.coerceIn(0, saved.songs.lastIndex)
@@ -156,6 +172,10 @@ object PlaybackController {
         )
         applyMode(p, saved.mode)
         p.setMediaItems(saved.songs.map { it.toMediaItem(currentBr) }, index, saved.positionMs)
+        if (MusicLibrary.settings.value.autoResume) {
+            p.prepare()
+            p.play()
+        }
     }
 
     private fun startTicker() {
@@ -163,7 +183,21 @@ object PlaybackController {
         ticker = scope.launch {
             while (isActive) {
                 val p = player
-                if (p != null && p.isPlaying) {
+                if (radioActive) {
+                    val playing = p?.isPlaying == true
+                    if (playing) {
+                        val raw = ListenMoeController.positionMs()
+                        if (!radioWasPlaying) radioOffsetMs = _state.value.positionMs - raw
+                        val song = ListenMoeController.state.value.song
+                        _state.update {
+                            it.copy(
+                                positionMs = (raw + radioOffsetMs).coerceAtLeast(0L),
+                                durationMs = song?.durationMs?.takeIf { d -> d > 0L } ?: it.durationMs,
+                            )
+                        }
+                    }
+                    radioWasPlaying = playing
+                } else if (p != null && p.isPlaying) {
                     _state.update {
                         it.copy(
                             positionMs = p.currentPosition.coerceAtLeast(0L),
@@ -172,7 +206,7 @@ object PlaybackController {
                     }
                     publishCurrentLyric()
                 }
-                delay(400)
+                delay(if (radioActive) 200 else 400)
             }
         }
     }
@@ -185,13 +219,23 @@ object PlaybackController {
         val index = p.currentMediaItemIndex
         val current = queue.getOrNull(index)
             ?: p.currentMediaItem?.mediaId?.let { id -> queue.firstOrNull { it.id == id } }
+        val radio = radioActive
         _state.update {
             it.copy(
                 song = current ?: it.song,
                 isPlaying = p.isPlaying,
                 isLoading = p.playbackState == Player.STATE_BUFFERING,
-                positionMs = p.currentPosition.coerceAtLeast(0L),
-                durationMs = p.duration.safeDuration(current?.durationMs ?: it.durationMs),
+                positionMs = if (radio) {
+                    radioPositionMs()
+                } else {
+                    p.currentPosition.coerceAtLeast(0L)
+                },
+                durationMs = if (radio) {
+                    ListenMoeController.state.value.song?.durationMs
+                        ?.takeIf { d -> d > 0L } ?: it.durationMs
+                } else {
+                    p.duration.safeDuration(current?.durationMs ?: it.durationMs)
+                },
                 queue = queue,
                 index = index,
                 mode = it.mode,
@@ -204,8 +248,9 @@ object PlaybackController {
 
     private val currentBr: Int get() = MusicLibrary.settings.value.quality.br
 
-    fun playSongs(songs: List<Song>, startIndex: Int = 0) {
+    fun playSongs(songs: List<Song>, startIndex: Int = 0, startPositionMs: Long = 0L) {
         if (songs.isEmpty()) return
+        leaveRadio()
         val index = startIndex.coerceIn(0, songs.lastIndex)
         _state.update {
             it.copy(
@@ -217,15 +262,110 @@ object PlaybackController {
             )
         }
         MusicLibrary.addHistory(songs[index])
-        scope.launch { prepareAndPlay(songs, index) }
+        scope.launch { prepareAndPlay(songs, index, startPositionMs) }
     }
 
-    private suspend fun prepareAndPlay(songs: List<Song>, index: Int) {
+    fun isRadio(): Boolean = radioActive
+
+    fun radioPositionMs(): Long =
+        if (radioActive) (ListenMoeController.positionMs() + radioOffsetMs).coerceAtLeast(0L) else 0L
+
+    fun startRadio(station: ListenMoeStation) {
+        radioActive = true
+        radioOffsetMs = 0L
+        radioWasPlaying = false
+        queue = emptyList()
+        MusicLibrary.clearSession()
+        val p = player
+        if (p == null) {
+            _state.value = PlaybackUiState(
+                song = radioPlaceholder(station),
+                isLoading = true,
+                queue = emptyList(),
+                index = 0,
+                mode = _state.value.mode,
+                volume = _state.value.volume,
+            )
+            return
+        }
+        fadeJob?.cancel()
+        p.volume = MusicLibrary.settings.value.volume
+        val item = MediaItem.Builder()
+            .setMediaId("listenmoe:${station.key}")
+            .setUri(station.streamUrl)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("LISTEN.moe ${station.shortLabel}")
+                    .setArtist("LISTEN.moe")
+                    .setAlbumTitle(station.label)
+                    .setArtworkUri(Uri.parse("https://listen.moe/images/share.jpg"))
+                    .build(),
+            )
+            .build()
+        p.setMediaItem(item)
+        p.repeatMode = Player.REPEAT_MODE_OFF
+        p.prepare()
+        play()
+        val known = ListenMoeController.state.value.song
+        _state.value = PlaybackUiState(
+            song = known?.toSong() ?: radioPlaceholder(station),
+            isPlaying = p.isPlaying,
+            isLoading = known == null,
+            positionMs = ListenMoeController.positionMs(),
+            durationMs = known?.durationMs ?: 0L,
+            queue = emptyList(),
+            index = 0,
+            mode = _state.value.mode,
+            volume = _state.value.volume,
+        )
+        sync()
+    }
+
+    fun onRadioSong(song: ListenMoeSong) {
+        if (!radioActive) return
+        radioOffsetMs = 0L
+        radioWasPlaying = false
+        _state.update {
+            it.copy(
+                song = song.toSong(),
+                durationMs = song.durationMs,
+                positionMs = ListenMoeController.positionMs(),
+                isLoading = false,
+                error = null,
+            )
+        }
+    }
+
+    private fun leaveRadio() {
+        if (!radioActive) return
+        radioActive = false
+        radioOffsetMs = 0L
+        radioWasPlaying = false
+        ListenMoeController.exit()
+    }
+
+    private fun radioPlaceholder(station: ListenMoeStation) = Song(
+        id = "listenmoe:${station.key}:loading",
+        name = "LISTEN.moe ${station.shortLabel}",
+        artists = listOf("正在连接"),
+        album = station.label,
+        picId = "",
+        lyricId = "",
+        source = ListenMoeSong.SOURCE,
+    )
+
+    private suspend fun prepareAndPlay(songs: List<Song>, index: Int, startPositionMs: Long = 0L) {
         val br = currentBr
         val p = player ?: return
         queue = songs
         val items = songs.map { it.toMediaItem(br) }
-        p.setMediaItems(items, index, 0L)
+        val duration = songs[index].durationMs
+        val start = when {
+            startPositionMs <= 0L -> 0L
+            duration > 5_000L -> startPositionMs.coerceIn(0L, duration - 3_000L)
+            else -> startPositionMs.coerceAtLeast(0L)
+        }
+        p.setMediaItems(items, index, start)
         applyMode(p, _state.value.mode)
         p.prepare()
         play()
@@ -245,7 +385,6 @@ object PlaybackController {
         .setUsage(C.USAGE_MEDIA)
         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
         .build()
-
 
     fun applyAudioFocus() {
         AudioFocusMonitor.setEnabled(MusicLibrary.settings.value.audioFocus)
@@ -292,6 +431,7 @@ object PlaybackController {
     }
 
     fun next() {
+        if (radioActive) return
         val p = player ?: return
         if (queue.isEmpty()) return
         when (_state.value.mode) {
@@ -307,6 +447,7 @@ object PlaybackController {
     }
 
     fun playAt(index: Int) {
+        if (radioActive) return
         val p = player ?: return
         if (index !in queue.indices) return
         p.seekTo(index, 0L)
@@ -315,6 +456,7 @@ object PlaybackController {
     }
 
     fun previous() {
+        if (radioActive) return
         val p = player ?: return
         if (queue.isEmpty()) return
         if (_state.value.mode == PlayMode.SHUFFLE) {
@@ -334,10 +476,12 @@ object PlaybackController {
     }
 
     fun seekTo(positionMs: Long) {
+        if (radioActive) return
         player?.seekTo(positionMs.coerceAtLeast(0L))
     }
 
     fun cyclePlayMode() {
+        if (radioActive) return
         val next = when (_state.value.mode) {
             PlayMode.ORDER -> PlayMode.SHUFFLE
             PlayMode.SHUFFLE -> PlayMode.REPEAT_ONE
@@ -364,6 +508,7 @@ object PlaybackController {
     }
 
     fun reloadCurrent() {
+        if (radioActive) return
         val p = player ?: return
         val idx = p.currentMediaItemIndex
         val song = queue.getOrNull(idx) ?: return
@@ -374,6 +519,7 @@ object PlaybackController {
     }
 
     fun playNext(song: Song) {
+        if (radioActive) return
         val p = player ?: return
         if (queue.isEmpty()) {
             playSongs(listOf(song), 0)
@@ -386,6 +532,7 @@ object PlaybackController {
     }
 
     fun addToQueue(song: Song) {
+        if (radioActive) return
         val p = player ?: return
         if (queue.isEmpty()) {
             playSongs(listOf(song), 0)
@@ -397,6 +544,7 @@ object PlaybackController {
     }
 
     fun removeFromQueue(songId: String) {
+        if (radioActive) return
         val p = player ?: return
         val index = queue.indexOfFirst { it.id == songId }
         if (index < 0) return
@@ -407,6 +555,7 @@ object PlaybackController {
     }
 
     fun moveInQueue(from: Int, to: Int) {
+        if (radioActive) return
         val p = player ?: return
         if (from !in queue.indices || to !in queue.indices || from == to) return
         val list = queue.toMutableList()
@@ -440,6 +589,7 @@ object PlaybackController {
 
     fun clearQueue() {
         val p = player ?: return
+        leaveRadio()
         queue = emptyList()
         MusicLibrary.clearSession()
         p.clearMediaItems()
@@ -462,6 +612,11 @@ object PlaybackController {
         lastPublishedTitle = null
         liveLyricSongId = song?.id.orEmpty()
         if (song == null) return
+
+        if (song.source == ListenMoeSong.SOURCE) {
+            _playBarLyric.value = ""
+            return
+        }
 
         if (song.isLocal) {
             publishTitle(song.name)
@@ -508,7 +663,8 @@ object PlaybackController {
     private fun Song.toMediaItem(br: Int): MediaItem {
         val song = this
 
-        val uri: String = if (isLocal) localUri else GdApi.streamEndpoint(id, br, source)
+        val uri: String = if (isLocal) localUri
+        else GdApi.streamEndpoint(id, if (isBili) 999 else br, source)
         return MediaItem.Builder()
             .setMediaId(id)
             .setUri(uri)

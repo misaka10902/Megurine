@@ -19,11 +19,11 @@ import kotlinx.coroutines.runBlocking
 
 object MediaCache {
 
-    private const val DIR_NAME = "hyper_media_cache"
+    private const val DIR_NAME = AppCache.MEDIA_DIR
 
     private const val URL_PREFS = "hyper_stream_url_cache"
 
-    private const val MAX_BYTES = 512L * 1024 * 1024
+    private const val MAX_BYTES = AppCache.MAX_BYTES
 
     private const val UA =
         "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
@@ -59,9 +59,21 @@ object MediaCache {
             .setConnectTimeoutMs(10_000)
             .setReadTimeoutMs(15_000)
 
+        val biliHttp = DefaultHttpDataSource.Factory()
+            .setUserAgent(BiliApi.UA)
+            .setAllowCrossProtocolRedirects(true)
+            .setDefaultRequestProperties(
+                mapOf(
+                    "Referer" to BiliApi.REFERER,
+                    "Cookie" to BiliApi.COOKIE,
+                ),
+            )
+            .setConnectTimeoutMs(10_000)
+            .setReadTimeoutMs(15_000)
+
         val upstream = DefaultDataSource.Factory(
             context.applicationContext,
-            GdStreamDataSource.Factory(http),
+            GdStreamDataSource.Factory(http, biliHttp),
         )
 
         val cached = CacheDataSource.Factory()
@@ -98,38 +110,77 @@ object MediaCache {
     }
 
     private class GdStreamDataSource(
-        private val upstream: DataSource,
-    ) : DataSource by upstream {
+        private val upstreamFactory: DataSource.Factory,
+        private val biliFactory: DataSource.Factory,
+    ) : DataSource {
+
+        private var delegate: DataSource? = null
+        private var listener: TransferListener? = null
+
+        override fun addTransferListener(listener: TransferListener) {
+            this.listener = listener
+            delegate?.addTransferListener(listener)
+        }
+
+        private fun attach(dataSource: DataSource): DataSource {
+            listener?.let { dataSource.addTransferListener(it) }
+            delegate = dataSource
+            return dataSource
+        }
 
         override fun open(dataSpec: DataSpec): Long {
             val uri = dataSpec.uri
             if (!uri.toString().contains("types=url", ignoreCase = true)) {
-                return upstream.open(dataSpec)
+                return attach(upstreamFactory.createDataSource()).open(dataSpec)
             }
             val id = uri.getQueryParameter("id")
             val br = uri.getQueryParameter("br")?.toIntOrNull() ?: 320
             val source = uri.getQueryParameter("source") ?: GdApi.SOURCE
-            if (id.isNullOrBlank()) return upstream.open(dataSpec)
+            if (id.isNullOrBlank()) {
+                return attach(upstreamFactory.createDataSource()).open(dataSpec)
+            }
 
-            fun openResolved(real: String) =
-                upstream.open(dataSpec.buildUpon().setUri(Uri.parse(real)).build())
+            fun factoryFor(src: String): DataSource.Factory =
+                if (src == BiliApi.SOURCE) biliFactory else upstreamFactory
+
+            fun openResolved(real: String, src: String) =
+                attach(factoryFor(src).createDataSource())
+                    .open(dataSpec.buildUpon().setUri(Uri.parse(real)).build())
 
             val real = resolveWithFallback(id, br, source)
-            if (real.isNullOrBlank()) return upstream.open(dataSpec)
+            if (real.isNullOrBlank()) {
+                return attach(upstreamFactory.createDataSource()).open(dataSpec)
+            }
             return try {
-                openResolved(real)
+                openResolved(real, source)
             } catch (e: Exception) {
-
                 StreamUrlCache.invalidateOne(id, br, source)
                 val fresh = resolveWithFallback(id, br, source)
                 if (fresh.isNullOrBlank()) throw e
-                openResolved(fresh)
+                openResolved(fresh, source)
             }
         }
 
-        class Factory(private val upstreamFactory: DataSource.Factory) : DataSource.Factory {
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+            delegate?.read(buffer, offset, length)
+                ?: throw IOException("DataSource 尚未打开")
+
+        override fun getUri(): Uri = delegate?.uri ?: Uri.EMPTY
+
+        override fun getResponseHeaders(): Map<String, List<String>> =
+            delegate?.responseHeaders ?: emptyMap()
+
+        override fun close() {
+            delegate?.close()
+            delegate = null
+        }
+
+        class Factory(
+            private val upstreamFactory: DataSource.Factory,
+            private val biliFactory: DataSource.Factory,
+        ) : DataSource.Factory {
             override fun createDataSource(): DataSource =
-                GdStreamDataSource(upstreamFactory.createDataSource())
+                GdStreamDataSource(upstreamFactory, biliFactory)
         }
     }
 
@@ -148,7 +199,14 @@ object MediaCache {
 
         override fun open(dataSpec: DataSpec): Long {
             val scheme = dataSpec.uri.scheme?.lowercase()
-            val factory = if (scheme == "file" || scheme == "content") directFactory else cachedFactory
+            val host = dataSpec.uri.host.orEmpty()
+            val liveStream = host.equals("listen.moe", ignoreCase = true) ||
+                host.endsWith(".listen.moe", ignoreCase = true)
+            val factory = if (scheme == "file" || scheme == "content" || liveStream) {
+                directFactory
+            } else {
+                cachedFactory
+            }
             val ds = factory.createDataSource()
             transferListener?.let { ds.addTransferListener(it) }
             delegate = ds

@@ -80,6 +80,7 @@ import com.hyper.music.ui.components.TrackRow
 import com.hyper.music.ui.components.dragReorderItem
 import com.hyper.music.ui.components.dragReorderSurface
 import com.hyper.music.ui.components.rememberDragReorderState
+import com.hyper.music.ui.components.rememberPlaylistCoverPick
 import com.hyper.music.ui.utils.isAppDarkTheme
 import com.hyper.music.ui.utils.isLargeScreen
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -93,6 +94,7 @@ import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Image
 import top.yukonga.miuix.kmp.icon.extended.ListView
 import top.yukonga.miuix.kmp.icon.glass.Item
 import top.yukonga.miuix.kmp.icon.extended.Playlist
@@ -101,7 +103,6 @@ import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.WorldClock
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import androidx.compose.foundation.Image
 
 private val ContentBottomReserve = 145.dp
 
@@ -293,9 +294,23 @@ fun PlaylistScreen(
     val playlists by MusicLibrary.playlists.collectAsState()
     val scheme = MiuixTheme.colorScheme
     val haptic = LocalHapticFeedback.current
+    val pickCover = rememberPlaylistCoverPick()
+
+    var shownPlaylists by remember { mutableStateOf(playlists) }
+    val listAlpha = remember { Animatable(1f) }
+    LaunchedEffect(playlists) {
+        if (playlists.isEmpty() && shownPlaylists.isNotEmpty()) {
+            listAlpha.snapTo(1f)
+            listAlpha.animateTo(0f, tween(280, easing = FastOutSlowInEasing))
+            shownPlaylists = emptyList()
+            listAlpha.snapTo(1f)
+        } else if (playlists.isNotEmpty()) {
+            shownPlaylists = playlists
+            listAlpha.snapTo(1f)
+        }
+    }
 
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-
 
     var deleteAnchor by remember { mutableIntStateOf(-1) }
     val motionScope = rememberCoroutineScope()
@@ -306,13 +321,11 @@ fun PlaylistScreen(
         editing = false
         selectedIds = emptySet()
 
-
         onSelectionChange(null)
     }
     BackHandler(enabled = multiSelect) { exitEdit() }
 
     LaunchedEffect(selectedIds, playlists, editing) {
-
 
         if (!editing) return@LaunchedEffect
         val picked = playlists.filter { it.id in selectedIds }
@@ -322,6 +335,14 @@ fun PlaylistScreen(
                 count = picked.size,
                 actions = listOf(
 
+                    SelectionAction(
+                        label = "设置封面",
+                        icon = MiuixIcons.Image,
+                        enabled = picked.size == 1,
+                    ) {
+                        picked.singleOrNull()?.let { pickCover(it.id) }
+                        exitEdit()
+                    },
                     SelectionAction(
                         label = "重命名",
                         icon = MiuixIcons.Rename,
@@ -380,7 +401,6 @@ fun PlaylistScreen(
         )
     }
 
-
     val density = LocalDensity.current
     LaunchedEffect(dragState.isDragging) {
         if (!dragState.isDragging) return@LaunchedEffect
@@ -405,7 +425,7 @@ fun PlaylistScreen(
     }
     val insetModifier = modifier
 
-    if (playlists.isEmpty()) {
+    if (shownPlaylists.isEmpty()) {
         Box(
             modifier = modifier
                 .fillMaxSize(),
@@ -423,7 +443,6 @@ fun PlaylistScreen(
         modifier = Modifier
             .fillMaxSize()
 
-
             .dragReorderSurface(dragState, multiSelect) { gridGeoms() },
     ) {
     LazyVerticalGrid(
@@ -431,6 +450,7 @@ fun PlaylistScreen(
         columns = GridCells.Fixed(if (wideScreen) 4 else 2),
         modifier = insetModifier
             .fillMaxSize()
+            .graphicsLayer { alpha = listAlpha.value }
             .overScrollVertical(onOffsetChanged = { offset -> scrollBehavior?.state?.overscrollOffset = offset })
             .scrollEndHaptic(hapticFeedbackType = HapticFeedbackType.TextHandleMove)
             .then(
@@ -447,7 +467,7 @@ fun PlaylistScreen(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        itemsIndexed(playlists, key = { _, p -> p.id }) { index, playlist ->
+        itemsIndexed(shownPlaylists, key = { _, p -> p.id }) { index, playlist ->
             PlaylistCard(
                 playlist = playlist,
                 selected = playlist.id in selectedIds,
@@ -456,7 +476,6 @@ fun PlaylistScreen(
 
                     .animateItem(
                         fadeInSpec = tween(200),
-
 
                         placementSpec = if (dragState.isDragging || dragState.settling || dragState.suppressPlacement) {
                             null
@@ -543,10 +562,12 @@ private fun PlaylistCard(
     dragModifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
-    val cover = remember(playlist.songs) {
-        playlist.songs.firstOrNull()?.let {
-            GdApi.coverUrl(it, CoverSize.MEDIUM.request).ifBlank { null }
-        }
+    val cover = remember(playlist.cover, playlist.songs) {
+        playlist.cover.ifBlank {
+            playlist.songs.firstOrNull()?.let {
+                GdApi.coverUrl(it, CoverSize.MEDIUM.request)
+            }.orEmpty()
+        }.ifBlank { null }
     }
     val cardShape = RoundedCornerShape(24.dp)
 

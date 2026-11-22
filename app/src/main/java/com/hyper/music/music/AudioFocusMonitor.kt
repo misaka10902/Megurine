@@ -22,13 +22,11 @@ object AudioFocusMonitor {
             change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
             change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK
 
-
     fun init(context: Context) {
         audioManager = context.applicationContext
             .getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         enabled = MusicLibrary.settings.value.audioFocus
     }
-
 
     fun setEnabled(value: Boolean) {
         if (enabled == value) return
@@ -39,7 +37,6 @@ object AudioFocusMonitor {
             !wasEnabled && playbackRequested -> acquireFocus()
         }
     }
-
 
     fun onPlaybackIntentChanged(play: Boolean) {
         playbackRequested = play

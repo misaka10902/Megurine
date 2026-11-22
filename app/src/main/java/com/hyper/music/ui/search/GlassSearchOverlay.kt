@@ -30,10 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -47,7 +44,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -94,13 +90,15 @@ private val SearchModeEasing: Easing = run {
     }
 }
 
-
 @Composable
 internal fun GlassSearchOverlay(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     expanded: Boolean = false,
     label: String = "搜索歌曲、歌手和专辑...",
+    query: String,
+    onQueryChange: (String) -> Unit,
+    backEnabled: Boolean = true,
     content: @Composable ColumnScope.(String) -> Unit = {},
 ) {
     val transition = updateTransition(expanded, label = "glassSearch")
@@ -112,7 +110,6 @@ internal fun GlassSearchOverlay(
         transitionSpec = { tween(150, delayMillis = if (targetState) 100 else 0, easing = LinearEasing) },
         label = "glassSearchCancelMaterial",
     ) { if (it) 1f else 0f }
-    var query by remember { mutableStateOf("") }
     val fieldHandle = rememberNativeTextFieldHandle()
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -120,10 +117,8 @@ internal fun GlassSearchOverlay(
     val active = expanded || transition.currentState || transition.isRunning
     LaunchedEffect(expanded) {
 
-
         if (expanded) {
-            query = ""
-
+            onQueryChange("")
 
             repeat(8) { attempt ->
                 fieldHandle.requestFocusAndShowIme()
@@ -139,7 +134,7 @@ internal fun GlassSearchOverlay(
     if (!active) return
     NavigationBackHandler(
         state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
-        isBackEnabled = expanded,
+        isBackEnabled = expanded && backEnabled,
         onBackCompleted = onDismissRequest,
     )
     val colors = MiuixTheme.colorScheme
@@ -160,7 +155,6 @@ internal fun GlassSearchOverlay(
                 .matchParentSize()
                 .clickable(interactionSource = null, indication = null) { keyboard?.hide() },
         )
-
 
         Column(
             modifier = Modifier
@@ -190,7 +184,6 @@ internal fun GlassSearchOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
 
-
                         .padding(end = 52.dp * progress.value)
                         .height(44.dp)
                         .background(colors.surfaceContainerHigh, CircleShape)
@@ -201,7 +194,7 @@ internal fun GlassSearchOverlay(
                     Icon(MiuixIcons.Glass.Search, contentDescription = null, modifier = Modifier.size(28.dp), tint = colors.disabledOnSurface)
                     NativeTextField(
                         value = query,
-                        onValueChange = { query = it },
+                        onValueChange = onQueryChange,
                         hint = label,
                         textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface),
                         singleLine = true,
@@ -209,22 +202,12 @@ internal fun GlassSearchOverlay(
                         autoFocus = expanded,
                         handle = fieldHandle,
                         onDone = { keyboard?.hide() },
-                        modifier = Modifier
-                            .weight(1f)
-                            .layout { measurable, constraints ->
-
-                                val endSpace = (54.dp.toPx() * progress.value).toInt()
-                                val width = (constraints.maxWidth - endSpace).coerceAtLeast(0)
-                                val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
-                                layout(constraints.maxWidth, placeable.height) {
-                                    placeable.placeRelative(0, 0)
-                                }
-                            },
+                        modifier = Modifier.weight(1f),
                     )
                     if (query.isNotEmpty()) {
                         IconButton(
                             onClick = {
-                                query = ""
+                                onQueryChange("")
                                 fieldHandle.requestFocus()
                             },
                             modifier = Modifier.size(24.dp),
@@ -259,7 +242,6 @@ internal fun GlassSearchOverlay(
     }
 }
 
-
 @Composable
 internal fun rememberGlassSearchBarAlpha(expanded: Boolean): State<Float> {
     val transition = updateTransition(expanded, label = "glassSearchTopBarOpacity")
@@ -270,7 +252,6 @@ internal fun rememberGlassSearchBarAlpha(expanded: Boolean): State<Float> {
         label = "glassSearchTopBarAlpha",
     ) { if (it) 0f else 1f }
 }
-
 
 @Composable
 internal fun Modifier.glassSearchBarTransition(expanded: Boolean, barAlpha: () -> Float): Modifier {

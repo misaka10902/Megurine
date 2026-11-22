@@ -16,6 +16,10 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <queries>
+        <package android:name="com.melox.player" />
+    </queries>
+
     <application
         android:name=".HyperApp"
         android:allowBackup="true"
@@ -55,6 +59,12 @@
             android:name=".music.ArtworkProvider"
             android:authorities="com.hyper.music.artwork"
             android:exported="true"
+            android:grantUriPermissions="true" />
+
+        <provider
+            android:name=".music.LocalAudioProvider"
+            android:authorities="com.hyper.music.localaudio"
+            android:exported="false"
             android:grantUriPermissions="true" />
 
         <service

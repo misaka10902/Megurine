@@ -133,7 +133,6 @@ fun CourseHyperTheme(
 
     val targetColors = controller.currentColors()
 
-
     val themeKey = "${themeMode.value}|${themeColor.value}|${targetColors.primary.toArgb()}"
     var displayColors by remember { mutableStateOf(targetColors) }
     LaunchedEffect(themeKey) {

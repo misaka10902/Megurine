@@ -4,11 +4,13 @@ data class LyricLine(
     val timeMs: Long,
     val text: String,
     val translation: String = "",
+    val roman: String = "",
 )
 
 data class LyricResult(
     val lyric: String,
     val translation: String,
+    val roman: String = "",
 )
 
 private val TIME_TAG = Regex("""\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?]""")
@@ -54,13 +56,14 @@ private fun parseLrc(raw: String?): Map<Long, String> {
     return result
 }
 
-fun buildLyrics(raw: String?, translationRaw: String?): List<LyricLine> {
+fun buildLyrics(raw: String?, translationRaw: String?, romanRaw: String? = null): List<LyricLine> {
     val main = parseLrc(raw)
     if (main.isEmpty()) return emptyList()
     val trans = parseLrc(translationRaw)
+    val roman = parseLrc(romanRaw)
     return main.entries
         .sortedBy { it.key }
-        .map { (time, text) -> LyricLine(time, text, trans[time].orEmpty()) }
+        .map { (time, text) -> LyricLine(time, text, trans[time].orEmpty(), roman[time].orEmpty()) }
 
         .filter { it.text.isNotBlank() || it.translation.isNotBlank() }
 }

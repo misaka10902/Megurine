@@ -2,6 +2,9 @@ package com.hyper.music.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -15,17 +18,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -62,7 +73,6 @@ private fun openUrl(context: Context, url: String) {
     }
 }
 
-
 @Composable
 fun AboutAppScreen(onBack: () -> Unit, backdrop: LayerBackdrop) {
     val context = LocalContext.current
@@ -72,18 +82,43 @@ fun AboutAppScreen(onBack: () -> Unit, backdrop: LayerBackdrop) {
     val horizontalPadding = horizontalContentPadding()
     val auroraBackdrop = rememberLayerBackdrop()
     val scheme = MiuixTheme.colorScheme
+    val density = LocalDensity.current
+    val listState = rememberLazyListState()
+    var headerHeightPx by remember { mutableIntStateOf(0) }
+    val headerSpace = if (headerHeightPx > 0) {
+        with(density) { headerHeightPx.toDp() }
+    } else {
+        216.dp
+    }
+    val collapseSpace = headerSpace + 96.dp
+    val collapsePx = with(density) { collapseSpace.toPx() }
+    val scrollProgress by remember(listState, collapsePx) {
+        derivedStateOf {
+            val scrolled = if (listState.firstVisibleItemIndex > 0) {
+                collapsePx
+            } else {
+                listState.firstVisibleItemScrollOffset.toFloat()
+            }
+            (scrolled / collapsePx).coerceIn(0f, 1f)
+        }
+    }
+    val collapseProgress by animateFloatAsState(
+        targetValue = scrollProgress,
+        animationSpec = tween(durationMillis = 180, easing = LinearEasing),
+        label = "aboutHeaderCollapse",
+    )
 
     DetailPage(
         title = "关于",
         onBack = onBack,
         backdrop = backdrop,
 
-
         compactTitle = true,
         autoHideTitle = true,
         hideWallpaper = true,
         activeBackdrop = auroraBackdrop,
 
+        listState = listState,
         listModifier = Modifier.bottomContentFade(
             startFromBottom = MiniPlayerToNavBarSpacing + BottomBarAreaHeight + 16.dp,
             bottomAlpha = 0.12f,
@@ -97,33 +132,58 @@ fun AboutAppScreen(onBack: () -> Unit, backdrop: LayerBackdrop) {
                 AuroraBackground(modifier = Modifier.fillMaxSize())
             }
         },
-        header = {
+        header = {},
+        overlay = {
+            val versionT = ((collapseProgress - 0.05f) / 0.25f).coerceIn(0f, 1f)
+            val titleT = ((collapseProgress - 0.30f) / 0.25f).coerceIn(0f, 1f)
+            val iconT = ((collapseProgress - 0.55f) / 0.27f).coerceIn(0f, 1f)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 36.dp),
+                    .padding(top = 36.dp)
+                    .onSizeChanged { headerHeightPx = it.height },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
 
-
                 AboutLogoIcon(
-                    modifier = Modifier.size(96.dp),
+                    modifier = Modifier
+                        .size(96.dp)
+                        .alpha(1f - iconT)
+                        .graphicsLayer {
+                            scaleX = 1f - iconT * 0.07f
+                            scaleY = 1f - iconT * 0.07f
+                        },
                     backdrop = auroraBackdrop,
                 )
                 Spacer(Modifier.height(18.dp))
-                AboutLogoTitle(text = "澎湃音乐", backdrop = auroraBackdrop)
+                AboutLogoTitle(
+                    text = "寻音",
+                    backdrop = auroraBackdrop,
+                    modifier = Modifier
+                        .alpha(1f - titleT)
+                        .graphicsLayer {
+                            scaleX = 1f - titleT * 0.07f
+                            scaleY = 1f - titleT * 0.07f
+                        },
+                )
                 Spacer(Modifier.height(5.dp))
                 Text(
                     text = "版本 $versionName",
                     fontSize = 14.sp,
                     color = scheme.onSurfaceVariantSummary,
                     textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .alpha(1f - versionT)
+                        .graphicsLayer {
+                            scaleX = 1f - versionT * 0.07f
+                            scaleY = 1f - versionT * 0.07f
+                        },
                 )
             }
         },
         list = {
 
-            item { Spacer(Modifier.height(96.dp)) }
+            item { Spacer(Modifier.height(collapseSpace)) }
             item {
                 Box(Modifier.padding(horizontal = horizontalPadding)) {
                     AboutSection(title = "项目", backdrop = auroraBackdrop) {
@@ -146,24 +206,10 @@ fun AboutAppScreen(onBack: () -> Unit, backdrop: LayerBackdrop) {
             item {
                 Spacer(Modifier.height(12.dp))
                 Box(Modifier.padding(horizontal = horizontalPadding)) {
-                    AboutSection(title = "致谢", backdrop = auroraBackdrop) {
-                        ArrowPreference(
-                            title = "GD Studio",
-                            summary = "音源服务提供",
-                            onClick = {
-                                openUrl(context, "https://music.gdstudio.org/")
-                            },
-                        )
-                        ArrowPreference(
-                            title = "Otter Music",
-                            summary = "提供API接入思路",
-                            onClick = {
-                                openUrl(context, "https://otter-music.pages.dev/")
-                            },
-                        )
+                    AboutSection(title = "框架", backdrop = auroraBackdrop) {
                         ArrowPreference(
                             title = "Compose Miuix",
-                            summary = "界面基础框架，澎湃化的根基",
+                            summary = "界面基础框架",
                             onClick = {
                                 openUrl(context, "https://compose-miuix-ui.github.io/miuix/")
                             },
@@ -175,11 +221,25 @@ fun AboutAppScreen(onBack: () -> Unit, backdrop: LayerBackdrop) {
                                 openUrl(context, "https://developer.android.com/media/media3")
                             },
                         )
+                    }
+                }
+            }
+            item {
+                Spacer(Modifier.height(12.dp))
+                Box(Modifier.padding(horizontal = horizontalPadding)) {
+                    AboutSection(title = "致谢", backdrop = auroraBackdrop) {
                         ArrowPreference(
-                            title = "Nexio Scheduler",
-                            summary = "项目初期界面构建参考",
+                            title = "GD Studio",
+                            summary = "音源服务提供",
                             onClick = {
-                                openUrl(context, "https://haozai000.github.io/NexioSchedule/")
+                                openUrl(context, "https://music.gdstudio.org/")
+                            },
+                        )
+                        ArrowPreference(
+                            title = "LISTEN.moe",
+                            summary = "电台模式服务提供",
+                            onClick = {
+                                openUrl(context, "https://listen.moe/")
                             },
                         )
                         ArrowPreference(
@@ -189,13 +249,26 @@ fun AboutAppScreen(onBack: () -> Unit, backdrop: LayerBackdrop) {
                                 openUrl(context, "https://github.com/Inefy-03/Melox")
                             },
                         )
+                        ArrowPreference(
+                            title = "Otter Music",
+                            summary = "API适配方案参考",
+                            onClick = {
+                                openUrl(context, "https://otter-music.pages.dev/")
+                            },
+                        )
+                        ArrowPreference(
+                            title = "Nexio Scheduler",
+                            summary = "项目初期界面构建参考",
+                            onClick = {
+                                openUrl(context, "https://haozai000.github.io/NexioSchedule/")
+                            },
+                        )
                     }
                 }
             }
         },
     )
 }
-
 
 @Composable
 private fun rememberLogoBlend(): List<BlendColorEntry> {
@@ -216,7 +289,6 @@ private fun rememberLogoBlend(): List<BlendColorEntry> {
         }
     }
 }
-
 
 @Composable
 private fun AboutLogoIcon(
@@ -247,9 +319,12 @@ private fun AboutLogoIcon(
     }
 }
 
-
 @Composable
-private fun AboutLogoTitle(text: String, backdrop: LayerBackdrop) {
+private fun AboutLogoTitle(
+    text: String,
+    backdrop: LayerBackdrop,
+    modifier: Modifier = Modifier,
+) {
     val advanced = LocalAdvancedMaterialEnabled.current
     val shaderSupported = remember { isRuntimeShaderSupported() }
     val logoBlend = rememberLogoBlend()
@@ -259,17 +334,19 @@ private fun AboutLogoTitle(text: String, backdrop: LayerBackdrop) {
         fontWeight = FontWeight.Bold,
         color = MiuixTheme.colorScheme.onBackground,
         textAlign = TextAlign.Center,
-        modifier = if (advanced && shaderSupported) {
-            Modifier.textureBlur(
-                backdrop = backdrop,
-                shape = RoundedCornerShape(16.dp),
-                blurRadius = 150f,
-                colors = BlurDefaults.blurColors(blendColors = logoBlend),
-                contentBlendMode = BlendMode.DstIn,
-            )
-        } else {
-            Modifier
-        },
+        modifier = modifier.then(
+            if (advanced && shaderSupported) {
+                Modifier.textureBlur(
+                    backdrop = backdrop,
+                    shape = RoundedCornerShape(16.dp),
+                    blurRadius = 150f,
+                    colors = BlurDefaults.blurColors(blendColors = logoBlend),
+                    contentBlendMode = BlendMode.DstIn,
+                )
+            } else {
+                Modifier
+            },
+        ),
     )
 }
 

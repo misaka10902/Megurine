@@ -50,7 +50,6 @@ object CoverSaver {
     }
 }
 
-
 @Composable
 fun Modifier.saveCoverOnLongPress(
     url: String?,

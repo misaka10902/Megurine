@@ -36,7 +36,6 @@ import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.sin
 
-
 @Composable
 fun AuroraBackground(
     modifier: Modifier = Modifier,
@@ -44,8 +43,11 @@ fun AuroraBackground(
     bgModifier: Modifier = Modifier,
     animated: Boolean = true,
     alpha: () -> Float = { 1f },
+    darkMode: Boolean? = null,
+    tints: List<Color>? = null,
+    baseColor: Color? = null,
 ) {
-    val surface = MiuixTheme.colorScheme.surface
+    val surface = baseColor ?: MiuixTheme.colorScheme.surface
     val supported = remember { isRuntimeShaderSupported() }
     if (!supported) {
 
@@ -53,8 +55,8 @@ fun AuroraBackground(
         return
     }
 
-
-    val darkTarget = if (isAppDarkTheme()) 1f else 0f
+    val systemDark = isAppDarkTheme()
+    val darkTarget = if (darkMode ?: systemDark) 1f else 0f
     val darkFraction by animateFloatAsState(
         targetValue = darkTarget,
         animationSpec = tween(420, easing = FastOutSlowInEasing),
@@ -63,7 +65,18 @@ fun AuroraBackground(
     val mixState = rememberUpdatedState(darkFraction)
     val painter = remember { AuroraPainter() }
     val colorStage = remember { Animatable(0f) }
-
+    val customColors = remember(tints) {
+        tints?.takeIf { it.size == 4 }?.let { list ->
+            FloatArray(16).also { buf ->
+                list.forEachIndexed { i, c ->
+                    buf[i * 4] = c.red
+                    buf[i * 4 + 1] = c.green
+                    buf[i * 4 + 2] = c.blue
+                    buf[i * 4 + 3] = c.alpha
+                }
+            }
+        }
+    }
 
     LaunchedEffect(animated) {
         if (!animated) return@LaunchedEffect
@@ -92,11 +105,11 @@ fun AuroraBackground(
                     animated = animated,
                     colorStage = { colorStage.value },
                     alpha = alpha,
+                    customColors = customColors,
                 ),
         )
     }
 }
-
 
 internal class AuroraPreset(
     val points: FloatArray,
@@ -145,13 +158,12 @@ internal object AuroraPresets {
     )
 }
 
-
 private class AuroraPainter {
     val runtimeShader by lazy {
         RuntimeShader(AURORA_FRAG).also {
             it.setFloatUniform("uTranslateY", 0f)
             it.setFloatUniform("uNoiseScale", 1.5f)
-            it.setFloatUniform("uPointRadiusMulti", 1f)
+            it.setFloatUniform("uPointRadiusMulti", 1.12f)
             it.setFloatUniform("uAlphaMulti", 1f)
         }
     }
@@ -166,10 +178,10 @@ private class AuroraPainter {
     private var animTime = Float.NaN
     private var cachedBound = FloatArray(4)
 
-
     private var offsetMix = Float.NaN
     private var colorStageCache = Float.NaN
     private var colorMix = Float.NaN
+    private var usingCustom = false
     private var pointsTime = Float.NaN
     private var pointsMix = Float.NaN
 
@@ -186,7 +198,6 @@ private class AuroraPainter {
         runtimeShader.setFloatUniform("uAnimTime", time)
     }
 
-
     fun updatePreset(mix: Float) {
         if (offsetMix == mix) return
         offsetMix = mix
@@ -196,7 +207,6 @@ private class AuroraPainter {
         runtimeShader.setFloatUniform("uLightOffset", lerp(light.lightOffset, dark.lightOffset, mix))
         runtimeShader.setFloatUniform("uSaturateOffset", lerp(light.saturateOffset, dark.saturateOffset, mix))
     }
-
 
     fun updatePoints(time: Float, mix: Float) {
         if (pointsTime == time && pointsMix == mix) return
@@ -217,9 +227,18 @@ private class AuroraPainter {
         runtimeShader.setFloatUniform("uPointsAnim", pointsBuffer)
     }
 
-
-    fun updateColors(stage: Float, mix: Float) {
-        if (colorStageCache == stage && colorMix == mix) return
+    fun updateColors(stage: Float, mix: Float, custom: FloatArray?) {
+        if (custom != null) {
+            if (usingCustom && colorsBuffer.contentEquals(custom)) return
+            custom.copyInto(colorsBuffer)
+            usingCustom = true
+            colorStageCache = Float.NaN
+            colorMix = Float.NaN
+            runtimeShader.setFloatUniform("uColors", colorsBuffer)
+            return
+        }
+        if (!usingCustom && colorStageCache == stage && colorMix == mix) return
+        usingCustom = false
         colorStageCache = stage
         colorMix = mix
         val base = stage.toInt()
@@ -242,7 +261,6 @@ private class AuroraPainter {
         else -> preset.colors2
     }
 
-
     fun updateBound(width: Float, height: Float) {
         val drawHeight = height * 0.8f
         val heightRatio = drawHeight / height
@@ -256,7 +274,6 @@ private class AuroraPainter {
     }
 }
 
-
 private fun Modifier.auroraDraw(
     painter: AuroraPainter,
     mix: Float,
@@ -264,7 +281,8 @@ private fun Modifier.auroraDraw(
     animated: Boolean,
     colorStage: () -> Float,
     alpha: () -> Float,
-): Modifier = this then AuroraElement(painter, mix, surface, animated, colorStage, alpha)
+    customColors: FloatArray?,
+): Modifier = this then AuroraElement(painter, mix, surface, animated, colorStage, alpha, customColors)
 
 private data class AuroraElement(
     val painter: AuroraPainter,
@@ -273,10 +291,13 @@ private data class AuroraElement(
     val animated: Boolean,
     val colorStage: () -> Float,
     val alpha: () -> Float,
+    val customColors: FloatArray?,
 ) : ModifierNodeElement<AuroraNode>() {
-    override fun create(): AuroraNode = AuroraNode(painter, mix, surface, animated, colorStage, alpha)
+    override fun create(): AuroraNode =
+        AuroraNode(painter, mix, surface, animated, colorStage, alpha, customColors)
+
     override fun update(node: AuroraNode) {
-        node.bind(painter, mix, surface, animated, colorStage, alpha)
+        node.bind(painter, mix, surface, animated, colorStage, alpha, customColors)
     }
 }
 
@@ -287,6 +308,7 @@ private class AuroraNode(
     private var animated: Boolean,
     private var colorStage: () -> Float,
     private var alpha: () -> Float,
+    private var customColors: FloatArray?,
 ) : Modifier.Node(), DrawModifierNode {
 
     private var job: Job? = null
@@ -309,12 +331,14 @@ private class AuroraNode(
         animated: Boolean,
         colorStage: () -> Float,
         alpha: () -> Float,
+        customColors: FloatArray?,
     ) {
         this.painter = painter
         this.mix = mix
         this.surface = surface
         this.colorStage = colorStage
         this.alpha = alpha
+        this.customColors = customColors
         if (this.animated != animated) {
             this.animated = animated
             if (animated) start() else {
@@ -352,7 +376,7 @@ private class AuroraNode(
             painter.updateResolution(size.width, size.height)
             painter.updateBound(size.width, size.height)
             painter.updatePreset(mix)
-            painter.updateColors(colorStage(), mix)
+            painter.updateColors(colorStage(), mix, customColors)
             painter.updateAnimTime(animTime)
             painter.updatePoints(animTime, mix)
             drawRect(brush = painter.brush, alpha = a)
@@ -364,7 +388,6 @@ private class AuroraNode(
         drawContent()
     }
 }
-
 
 private const val AURORA_FRAG = """
     uniform vec2 uResolution;

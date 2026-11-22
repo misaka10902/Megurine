@@ -5,18 +5,25 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -33,23 +40,30 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hyper.music.music.CoverLoader
 import com.hyper.music.music.CoverSize
 import com.hyper.music.music.GdApi
+import com.hyper.music.music.MeloxBridge
 import com.hyper.music.music.MusicLibrary
 import com.hyper.music.music.NetCover
 import com.hyper.music.music.Playlist
@@ -58,10 +72,13 @@ import com.hyper.music.ui.effects.miuix.rememberPopupBackdrop
 import com.hyper.music.ui.effects.miuix.LocalAdvancedMaterialEnabled
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.glass.OverseasMusic
+import top.yukonga.miuix.kmp.icon.glass.Video
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.AddCircle
 import top.yukonga.miuix.kmp.icon.extended.Album
 import top.yukonga.miuix.kmp.icon.extended.Contacts
+import top.yukonga.miuix.kmp.icon.extended.ContactsCircle
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.icon.extended.Favorites
@@ -76,7 +93,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.layout.offset
+import kotlinx.coroutines.launch
+
+private val ArtistPickerRowHeight = 52.dp
 
 @Composable
 fun HyperSheet(
@@ -170,8 +189,10 @@ fun TrackMoreSheet(
     onChangeQuality: (Song) -> Unit,
     onDownload: (Song) -> Unit,
     onShare: (Song) -> Unit,
+    onOpenOriginalVideo: (Song) -> Unit,
     onDelete: ((Song) -> Unit)? = null,
     deleteLabel: String = "删除歌曲",
+    deleteIcon: ImageVector = MiuixIcons.Delete,
     showFavoriteOption: Boolean = true,
 ) {
     var lastSong by remember { mutableStateOf<Song?>(null) }
@@ -186,6 +207,7 @@ fun TrackMoreSheet(
     HyperSheet(visible = song != null, onDismiss = onDismiss) {
         val target = lastSong ?: return@HyperSheet
         val isFavorite = favorites.any { it.id == target.id }
+        Box(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth()) {
         AnimatedContent(
             targetState = showComments,
@@ -242,8 +264,15 @@ fun TrackMoreSheet(
                         )
                         Spacer(Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (target.isBili) {
+                                SourceBadge(text = "B站", container = Color(0xFFFB7299))
+                                Spacer(Modifier.width(5.dp))
+                            } else if (target.isLocal) {
+                                SourceBadge(text = "本地", container = Color(0xFF21BA6A))
+                                Spacer(Modifier.width(5.dp))
+                            }
                             Text(
-                                text = target.subtitle,
+                                text = if (target.isBili) target.artistText else target.subtitle,
                                 color = scheme.onSurfaceSecondary,
                                 fontSize = 12.sp,
                                 maxLines = 1,
@@ -272,7 +301,29 @@ fun TrackMoreSheet(
                     ) { onDismiss(); onAddToFavorite(target) }
                 }
 
-                if (!target.isLocal) {
+                if (target.isLocal) {
+                    MenuEntry(MiuixIcons.Glass.OverseasMusic, "在 Melox 中播放") {
+                        onDismiss()
+                        when (MeloxBridge.play(context, target)) {
+                            MeloxBridge.Result.NotInstalled -> Toast.makeText(
+                                context,
+                                "还没有安装 Melox",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            MeloxBridge.Result.Failed -> Toast.makeText(
+                                context,
+                                "无法在 Melox 中播放",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            MeloxBridge.Result.Launched -> Unit
+                        }
+                    }
+                }
+
+                if (target.isBili) {
+                    MenuEntry(MiuixIcons.Glass.Video, "查看原视频") { onDismiss(); onOpenOriginalVideo(target) }
+                    MenuEntry(MiuixIcons.Share, "分享") { onDismiss(); onShare(target) }
+                } else if (!target.isLocal) {
                     MenuEntry(MiuixIcons.Album, "专辑：${target.albumText}") { onDismiss(); onOpenAlbum(target) }
                     MenuEntry(MiuixIcons.Contacts, "艺术家：${target.artistText}") { onDismiss(); onOpenArtist(target) }
                     MenuEntry(MiuixIcons.Music, "音质：${quality.label} · ${quality.bitrateText}") { onDismiss(); onChangeQuality(target) }
@@ -281,12 +332,13 @@ fun TrackMoreSheet(
                     MenuEntry(MiuixIcons.Share, "分享") { onDismiss(); onShare(target) }
                 }
                 if (onDelete != null) {
-                    MenuEntry(MiuixIcons.Delete, deleteLabel, tint = scheme.error) {
+                    MenuEntry(deleteIcon, deleteLabel, tint = scheme.error) {
                         onDismiss()
                         onDelete(target)
                     }
                 }
             }
+        }
         }
         }
         }
@@ -300,11 +352,13 @@ private fun MenuEntry(
     text: String,
     tint: Color = MiuixTheme.colorScheme.onSurface,
     fontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(modifier)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -397,7 +451,7 @@ fun PlaylistPickerSheet(
 fun ArtistPickerSheet(
     song: Song?,
     onDismiss: () -> Unit,
-    onPick: (Song, String) -> Unit,
+    onPick: (String, String) -> Unit,
 ) {
     var lastSong by remember { mutableStateOf<Song?>(null) }
     if (song != null) lastSong = song
@@ -405,37 +459,113 @@ fun ArtistPickerSheet(
 
     HyperSheet(visible = song != null, onDismiss = onDismiss) {
         val target = lastSong ?: return@HyperSheet
-        Column(modifier = Modifier.fillMaxWidth()) {
-            SheetHeader("选择歌手")
-            SheetCard {
-                target.artists.forEach { artist ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                            ) { onPick(target, artist); onDismiss() }
-                            .padding(horizontal = 4.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+        val visible = song != null
+        val listState = rememberLazyListState()
+        var avatars by remember(target.id) { mutableStateOf<Map<Int, String>>(emptyMap()) }
+        LaunchedEffect(target.id, visible) {
+            if (!visible) return@LaunchedEffect
+            avatars = emptyMap()
+            target.artists.forEachIndexed { index, artist ->
+                launch {
+                    val url = runCatching {
+                        GdApi.artistAvatar(artist, target.artistIds.getOrNull(index).orEmpty())
+                    }.getOrDefault("")
+                    if (url.isNotBlank()) avatars = avatars + (index to url)
+                }
+            }
+        }
+        LaunchedEffect(target.id) {
+            if (target.artists.isNotEmpty()) listState.scrollToItem(0)
+        }
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val listMax = if (maxHeight.value.isFinite()) {
+                (maxHeight - 58.dp).coerceAtLeast(150.dp)
+            } else {
+                420.dp
+            }
+            val cardHeight = (ArtistPickerRowHeight * target.artists.size + 12.dp)
+                .coerceAtMost(listMax)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                SheetHeader("选择歌手")
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(cardHeight)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(scheme.surfaceContainer),
+                ) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(vertical = 6.dp),
                     ) {
-                        androidx.compose.foundation.Image(
-                            imageVector = MiuixIcons.Contacts,
-                            contentDescription = null,
-                            modifier = Modifier.size(23.dp),
-                            colorFilter = ColorFilter.tint(scheme.onSurface.copy(alpha = 0.92f)),
-                        )
-                        Spacer(Modifier.width(16.dp))
-                        Text(
-                            text = artist,
-                            color = scheme.onSurface,
-                            fontSize = 17.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        itemsIndexed(target.artists) { index, artist ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                    ) {
+                                        onPick(artist, target.artistIds.getOrNull(index).orEmpty())
+                                        onDismiss()
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                ArtistPickerAvatar(url = avatars[index].orEmpty())
+                                Spacer(Modifier.width(16.dp))
+                                Text(
+                                    text = artist,
+                                    color = scheme.onSurface,
+                                    fontSize = 17.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ArtistPickerAvatar(url: String) {
+    val scheme = MiuixTheme.colorScheme
+    var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    val alpha = remember(url) { Animatable(0f) }
+    LaunchedEffect(url) {
+        if (url.isBlank()) return@LaunchedEffect
+        val loaded = CoverLoader.load(url, 180)
+        if (loaded != null) {
+            bitmap = loaded
+            alpha.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+        }
+    }
+    Box(
+        modifier = Modifier
+            .size(23.dp)
+            .clip(CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.foundation.Image(
+            imageVector = MiuixIcons.ContactsCircle,
+            contentDescription = null,
+            modifier = Modifier.size(23.dp),
+            colorFilter = ColorFilter.tint(scheme.onSurface.copy(alpha = 0.92f)),
+        )
+        val image = bitmap
+        if (image != null) {
+            androidx.compose.foundation.Image(
+                bitmap = image,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer { this.alpha = alpha.value },
+            )
         }
     }
 }

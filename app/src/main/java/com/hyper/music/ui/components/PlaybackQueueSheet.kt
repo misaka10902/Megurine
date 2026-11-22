@@ -26,6 +26,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hyper.music.music.CoverSize
 import com.hyper.music.music.GdApi
+import com.hyper.music.music.ListenMoeController
 import com.hyper.music.music.NetCover
 import com.hyper.music.music.PlaybackController
 import com.hyper.music.music.Song
@@ -51,6 +54,7 @@ import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.icon.extended.Redo
 import top.yukonga.miuix.kmp.icon.extended.Undo
+import top.yukonga.miuix.kmp.icon.glass.OpenWithOtherApp
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -60,6 +64,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawWithContent
+import android.widget.Toast
+import kotlinx.coroutines.launch
 
 private val CurrentRowCorner = 18.dp
 
@@ -69,10 +75,14 @@ fun PlaybackQueueSheet(
     onDismiss: () -> Unit,
 ) {
     val state by PlaybackController.state.collectAsState()
+    val radio by ListenMoeController.state.collectAsState()
     val scheme = MiuixTheme.colorScheme
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var confirmClear by remember { mutableStateOf(false) }
+    var switchingId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(visible) {
         if (visible && state.index >= 0) {
@@ -114,35 +124,110 @@ fun PlaybackQueueSheet(
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Medium,
                     )
-                    if (state.queue.isNotEmpty()) {
+                    val subtitle = when {
+                        radio.active -> "LISTEN.moe · ${radio.station.label}"
+                        state.queue.isNotEmpty() -> "${state.index + 1} / ${state.queue.size}"
+                        else -> ""
+                    }
+                    if (subtitle.isNotEmpty()) {
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "${state.index + 1} / ${state.queue.size}",
+                            text = subtitle,
                             color = scheme.onSurfaceSecondary,
                             fontSize = 13.sp,
                         )
                     }
                 }
                 }
-                RoundIconButton(
-                    icon = MiuixIcons.Delete,
-                    description = "清空队列",
-                    iconSize = 24.dp,
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                    tint = if (state.queue.isEmpty()) {
-                        scheme.onSurfaceSecondary.copy(alpha = 0.35f)
-                    } else {
-                        scheme.onSurface
-                    },
-                    onClick = {
-                        if (state.queue.isEmpty()) return@RoundIconButton
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        confirmClear = true
-                    },
-                )
+                if (!radio.active) {
+                    RoundIconButton(
+                        icon = MiuixIcons.Delete,
+                        description = "清空队列",
+                        iconSize = 24.dp,
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        tint = if (state.queue.isEmpty()) {
+                            scheme.onSurfaceSecondary.copy(alpha = 0.35f)
+                        } else {
+                            scheme.onSurface
+                        },
+                        onClick = {
+                            if (state.queue.isEmpty()) return@RoundIconButton
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            confirmClear = true
+                        },
+                    )
+                }
             }
 
-            if (state.queue.isEmpty()) {
+            if (radio.active) {
+                if (radio.queue.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = if (radio.loading) "正在获取播放队列" else "队列还是空的",
+                            color = scheme.onSurfaceSecondary,
+                            fontSize = 14.sp,
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(queueSheetListHeight(radio.queue.size))
+                            .fadeListEdges(listState),
+                        contentPadding = PaddingValues(
+                            horizontal = 4.dp,
+                            vertical = QueueListVerticalPadding,
+                        ),
+                    ) {
+                        itemsIndexed(radio.queue, key = { _, song -> song.id }) { _, item ->
+                            val isCurrent = item.id == radio.song?.id
+                            QueueRow(
+                                song = item.toSong(),
+                                isCurrent = isCurrent,
+                                frameColor = frameColor,
+                                canMoveUp = false,
+                                canMoveDown = false,
+                                showActions = false,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                    onDismiss()
+                                },
+                                onMoveUp = {},
+                                onMoveDown = {},
+                                onRemove = {},
+                                onSwitchOnline = if (isCurrent) null else {
+                                    {
+                                        if (switchingId == null) {
+                                            switchingId = item.id
+                                            scope.launch {
+                                                val match = runCatching {
+                                                    ListenMoeController.findNeteaseMatch(item)
+                                                }.getOrNull()
+                                                switchingId = null
+                                                if (match != null) {
+                                                    onDismiss()
+                                                    PlaybackController.playSongs(listOf(match), 0, 0L)
+                                                } else {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "未找到同名歌曲",
+                                                        Toast.LENGTH_SHORT,
+                                                    ).show()
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            } else if (state.queue.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -253,10 +338,12 @@ private fun QueueRow(
     frameColor: Color,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
+    showActions: Boolean = true,
     onClick: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onRemove: () -> Unit,
+    onSwitchOnline: (() -> Unit)? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
 
@@ -315,25 +402,37 @@ private fun QueueRow(
             )
         }
 
-        if (canMoveUp || canMoveDown) {
+        if (onSwitchOnline != null) {
             RoundIconButton(
-                icon = if (canMoveUp) MiuixIcons.Undo else MiuixIcons.Redo,
-                description = if (canMoveUp) "上移播放位置" else "下移播放位置",
+                icon = MiuixIcons.Glass.OpenWithOtherApp,
+                description = "切换至在线音源",
                 iconSize = 19.dp,
                 tint = scheme.onSurface.copy(alpha = 0.85f),
-                onClick = if (canMoveUp) onMoveUp else onMoveDown,
+                onClick = onSwitchOnline,
             )
-        } else {
-            Spacer(Modifier.width(40.dp))
         }
-        Spacer(Modifier.width(4.dp))
-        RoundIconButton(
-            icon = MiuixIcons.Hide,
-            description = "从播放列表移除",
-            iconSize = 19.dp,
-            tint = scheme.onSurface.copy(alpha = 0.85f),
-            onClick = onRemove,
-        )
+
+        if (showActions) {
+            if (canMoveUp || canMoveDown) {
+                RoundIconButton(
+                    icon = if (canMoveUp) MiuixIcons.Undo else MiuixIcons.Redo,
+                    description = if (canMoveUp) "上移播放位置" else "下移播放位置",
+                    iconSize = 19.dp,
+                    tint = scheme.onSurface.copy(alpha = 0.85f),
+                    onClick = if (canMoveUp) onMoveUp else onMoveDown,
+                )
+            } else {
+                Spacer(Modifier.width(40.dp))
+            }
+            Spacer(Modifier.width(4.dp))
+            RoundIconButton(
+                icon = MiuixIcons.Hide,
+                description = "从播放列表移除",
+                iconSize = 19.dp,
+                tint = scheme.onSurface.copy(alpha = 0.85f),
+                onClick = onRemove,
+            )
+        }
     }
 }
 

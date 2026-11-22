@@ -43,7 +43,6 @@ import top.yukonga.miuix.kmp.glass.rememberGlassPopupAnchor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.PopupLayout
 
-
 @Composable
 @Suppress("UNUSED_PARAMETER")
 fun OverlayDropdownMenu(
@@ -220,7 +219,6 @@ fun OverlayDropdownMenu(
             }
         }
     }
-
 
     LaunchedEffect(expanded) {
         if (!expanded && mounted.value) {

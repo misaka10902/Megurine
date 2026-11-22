@@ -49,7 +49,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -67,6 +71,7 @@ import com.hyper.music.ui.components.RefreshIndicator
 import com.hyper.music.ui.components.SongPairRow
 import com.hyper.music.ui.components.TrackRow
 import com.hyper.music.ui.basic.chipBounce
+import com.hyper.music.ui.effects.miuix.LocalAdvancedMaterialEnabled
 import com.hyper.music.ui.basic.rememberChipBounce
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,14 +84,18 @@ import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.hyper.music.music.CoverSize
+import com.hyper.music.music.GdApi
 import androidx.compose.ui.text.font.FontWeight
 import top.yukonga.miuix.kmp.icon.extended.Album
-import top.yukonga.miuix.kmp.icon.extended.Contacts
-import top.yukonga.miuix.kmp.icon.extended.Music
+import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.ContactsCircle
+import top.yukonga.miuix.kmp.icon.glass.Music1
 import com.hyper.music.music.NetCover
 import com.hyper.music.music.CoverLoader
 import com.hyper.music.music.SearchAlbum
 import com.hyper.music.music.SearchArtist
+import com.hyper.music.music.SearchPlaylist
+import com.hyper.music.music.MusicApi
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
@@ -118,7 +127,6 @@ internal val SectionGap = 12.dp
 
 private val PlayBarTopReserve = 133.dp
 
-
 private object RecommendStore {
     val ids = MutableStateFlow<List<String>?>(null)
 }
@@ -127,7 +135,7 @@ private object RecommendStore {
 fun ExploreScreen(
     onPlaySongs: (List<Song>, Int) -> Unit,
     onMore: (Song) -> Unit,
-    onOpenArtist: (String) -> Unit,
+    onOpenArtist: (String, String) -> Unit,
     onOpenAlbum: (String, String) -> Unit,
     onOpenFavorites: () -> Unit,
     onOpenDownloads: () -> Unit,
@@ -142,16 +150,16 @@ fun ExploreScreen(
     val playlists by MusicLibrary.playlists.collectAsState()
     val favorites by MusicLibrary.favorites.collectAsState()
 
-    val localSongs by produceState(initialValue = emptyList<Song>(), context) {
+    val localRevision by LocalSongs.revision.collectAsState()
+
+    val localSongs by produceState(initialValue = emptyList<Song>(), context, localRevision) {
         value = withContext(Dispatchers.IO) { LocalSongs.scan(context) }
     }
-
 
     val recommendPool = remember(history, playlists) {
         (history + playlists.flatMap { it.songs }).distinctBy { it.id }
     }
     val poolById = remember(recommendPool) { recommendPool.associateBy { it.id } }
-
 
     val recommendedIds by RecommendStore.ids.collectAsState()
     val recommendSongs: List<Song> = remember(recommendedIds, poolById) {
@@ -179,7 +187,6 @@ fun ExploreScreen(
         }
     }
 
-
     LaunchedEffect(recommendPool) {
         if (recommendPool.isEmpty() || recommendSongs.isNotEmpty()) return@LaunchedEffect
         RecommendStore.ids.value = recommendPool.shuffled().take(10).map { it.id }
@@ -195,10 +202,8 @@ fun ExploreScreen(
     val columns = songColumns()
     val fraction = contentFraction(columns)
 
-
     val titlePad = 26.dp
     val cardPad = 20.dp
-
 
     val cardShape = rememberSquircleShape(20.dp)
     val cardColors = cardGlassColors()
@@ -233,7 +238,6 @@ fun ExploreScreen(
             ) {
 
                 SectionHeading(text = "猜你想听", horizontalPadding = titlePad)
-
 
                 AnimatedContent(
                     targetState = recommendSongs.isEmpty(),
@@ -279,7 +283,6 @@ fun ExploreScreen(
                                 RecommendCard(
                                     song = song,
 
-
                                     modifier = Modifier.animateItem(
                                         fadeInSpec = tween(320, easing = FastOutSlowInEasing),
                                         fadeOutSpec = tween(200, easing = FastOutSlowInEasing),
@@ -293,7 +296,6 @@ fun ExploreScreen(
 
                 Spacer(Modifier.height(20.dp))
 
-
                 SectionHeading(text = "我喜欢的歌曲", horizontalPadding = titlePad)
                 Card(
                     cornerRadius = 20.dp,
@@ -301,7 +303,6 @@ fun ExploreScreen(
                         .fillMaxWidth()
                         .padding(horizontal = cardPad)
                         .cardGlass(cardShape),
-
 
                     insideMargin = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 0.dp),
                     colors = cardColors,
@@ -316,36 +317,20 @@ fun ExploreScreen(
 
                 Spacer(Modifier.height(20.dp))
 
-
                 SectionHeading(text = "本地歌曲", horizontalPadding = titlePad)
                 Card(
                     cornerRadius = 20.dp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = cardPad)
-                        .cardGlass(cardShape)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onOpenDownloads,
-                        ),
-                    insideMargin = PaddingValues(16.dp),
+                        .cardGlass(cardShape),
+                    insideMargin = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 0.dp),
                     colors = cardColors,
                 ) {
-                    if (localSongs.isEmpty()) {
-                        ExploreEmptyCard(
-                            icon = MiuixIcons.Glass.FileDownloads,
-                            title = "还没有本地歌曲",
-                            subtitle = "将歌曲下载到本地，随时离线畅听",
-                        )
-                    } else {
-                        ExploreFilledCard(
-                            icon = MiuixIcons.Glass.FileDownloads,
-                            title = "共${localSongs.size}首本地歌曲",
-                            subtitle = "点击管理本地歌曲",
-                            cover = null,
-                        )
-                    }
+                    LocalSongsCard(
+                        count = localSongs.size,
+                        onOpen = onOpenDownloads,
+                    )
                 }
             }
         }
@@ -409,40 +394,67 @@ private fun ExploreEmptyCard(
 }
 
 @Composable
-private fun ExploreFilledCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    cover: String?,
+private fun LocalSongsCard(
+    count: Int,
+    onOpen: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Image(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(28.dp),
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.disabledOnSecondaryVariant),
-            )
-            Spacer(Modifier.height(14.dp))
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Text(text = subtitle, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 13.sp)
+    val scheme = MiuixTheme.colorScheme
+    val hasSongs = count > 0
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Image(
+                    imageVector = MiuixIcons.Glass.FileDownloads,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    colorFilter = ColorFilter.tint(scheme.disabledOnSecondaryVariant),
+                )
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = if (hasSongs) "共${count}首本地歌曲" else "还没有本地歌曲",
+                    color = scheme.onSurface,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = if (hasSongs) "点击管理本地歌曲" else "将歌曲下载到本地，随时离线畅听",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = 13.sp,
+                )
+            }
         }
-        if (!cover.isNullOrBlank()) {
-            NetCover(
-                url = cover,
-                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)),
-                corner = 12.dp,
-                maxSize = CoverSize.MEDIUM.decode,
+        Spacer(Modifier.height(14.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(scheme.onSurface.copy(alpha = 0.12f)),
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onOpen,
+                ),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text = "查看本地歌曲",
+                color = scheme.primary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
             )
         }
     }
 }
-
 
 @Composable
 private fun FavoritesCard(
@@ -514,7 +526,6 @@ private fun FavoritesCard(
     }
 }
 
-
 @Composable
 private fun FavoritesCoverStack(covers: List<String>) {
     if (covers.isEmpty()) return
@@ -572,15 +583,21 @@ internal fun SearchResults(
     songs: List<Song>,
     artists: List<SearchArtist>,
     albums: List<SearchAlbum>,
+    playlists: List<SearchPlaylist>,
     loading: Boolean,
-    listState: androidx.compose.foundation.lazy.LazyListState,
+    listStates: List<androidx.compose.foundation.lazy.LazyListState>,
     topPadding: Dp,
     onPlaySongs: (List<Song>, Int) -> Unit,
     onMore: (Song) -> Unit,
-    onOpenArtist: (String) -> Unit,
+    onOpenArtist: (String, String) -> Unit,
     onOpenAlbum: (String, String) -> Unit,
+    onOpenPlaylist: (SearchPlaylist) -> Unit,
+    onAddPlaylist: (SearchPlaylist) -> Unit,
+    addingPlaylistIds: Set<String>,
     onLoadMoreSongs: () -> Unit,
     loadingMoreSongs: Boolean,
+    onLoadMorePlaylists: () -> Unit,
+    loadingMorePlaylists: Boolean,
 ) {
     val contentPadding = PaddingValues(
 
@@ -588,6 +605,10 @@ internal fun SearchResults(
         bottom = androidx.compose.foundation.layout.WindowInsets.navigationBars
             .asPaddingValues().calculateBottomPadding() + PlayBarTopReserve + SectionGap,
     )
+    val songState = listStates.getOrNull(0) ?: rememberLazyListState()
+    val artistState = listStates.getOrNull(1) ?: rememberLazyListState()
+    val albumState = listStates.getOrNull(2) ?: rememberLazyListState()
+    val playlistState = listStates.getOrNull(3) ?: rememberLazyListState()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -597,7 +618,7 @@ internal fun SearchResults(
             0 -> SongResultList(
                 songs = songs,
                 loading = loading,
-                listState = listState,
+                listState = songState,
                 contentPadding = contentPadding,
                 onPlaySongs = onPlaySongs,
                 onMore = onMore,
@@ -609,15 +630,16 @@ internal fun SearchResults(
                 EmptyHint(
                     text = "没有找到相关歌手",
                     centered = true,
-                    icon = MiuixIcons.Contacts,
+                    icon = MiuixIcons.ContactsCircle,
                 )
             } else {
                 LazyColumn(
+                    state = artistState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = contentPadding,
                 ) {
                     items(artists, key = { it.id }) { a ->
-                        ArtistResultRow(artist = a, onClick = { onOpenArtist(a.name) })
+                        ArtistResultRow(artist = a, onClick = { onOpenArtist(a.name, a.id) })
                     }
                 }
             }
@@ -630,11 +652,45 @@ internal fun SearchResults(
                 )
             } else {
                 LazyColumn(
+                    state = albumState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = contentPadding,
                 ) {
                     items(albums, key = { it.id }) { al ->
                         AlbumResultRow(album = al, onClick = { onOpenAlbum(al.name, al.artist) })
+                    }
+                }
+            }
+
+            3 -> if (playlists.isEmpty() && !loading) {
+                EmptyHint(
+                    text = "没有找到相关歌单",
+                    centered = true,
+                    icon = MiuixIcons.Album,
+                )
+            } else {
+                LazyColumn(
+                    state = playlistState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = contentPadding,
+                ) {
+                    items(playlists, key = { it.id }) { p ->
+                        PlaylistResultRow(
+                            playlist = p,
+                            adding = p.id in addingPlaylistIds,
+                            onClick = { onOpenPlaylist(p) },
+                            onAdd = { onAddPlaylist(p) },
+                        )
+                    }
+                    if (loadingMorePlaylists) {
+                        item(key = "loadingMorePlaylists") {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                RefreshIndicator(text = "正在加载", size = 20.dp, strokeWidth = 2.dp)
+                            }
+                        }
                     }
                 }
             }
@@ -658,7 +714,7 @@ internal fun SongResultList(
         EmptyHint(
             text = "没有找到相关歌曲",
             centered = true,
-            icon = MiuixIcons.Music,
+            icon = MiuixIcons.Glass.Music1,
         )
     } else {
         LazyColumn(
@@ -719,14 +775,24 @@ internal fun ArtistResultRow(artist: SearchArtist, onClick: () -> Unit) {
             maxSize = CoverSize.SMALL.decode,
         )
         Spacer(Modifier.width(12.dp))
-        Text(
-            text = artist.name,
-            color = scheme.onSurface,
-            fontSize = 18.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = artist.name,
+                color = scheme.onSurface,
+                fontSize = 18.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (artist.songCount > 0) {
+                Text(
+                    text = "${artist.songCount} 首歌曲",
+                    color = scheme.onSurfaceSecondary,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
@@ -772,6 +838,88 @@ internal fun AlbumResultRow(album: SearchAlbum, onClick: () -> Unit) {
 }
 
 @Composable
+internal fun PlaylistResultRow(
+    playlist: SearchPlaylist,
+    adding: Boolean,
+    onClick: () -> Unit,
+    onAdd: () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    var fallbackCover by remember(playlist.id) { mutableStateOf("") }
+    LaunchedEffect(playlist.id, playlist.cover) {
+        fallbackCover = if (playlist.cover.isBlank()) {
+            MusicApi.playlistFirstCover(playlist.id)
+        } else {
+            ""
+        }
+    }
+    val cover = remember(playlist.cover, fallbackCover) {
+        GdApi.sizedCover(
+            playlist.cover.ifBlank { fallbackCover },
+            CoverSize.SMALL.request,
+        ).ifBlank { null }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 0.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NetCover(
+            url = cover,
+            modifier = Modifier.size(48.dp),
+            corner = 12.dp,
+            maxSize = CoverSize.SMALL.decode,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = playlist.name,
+                color = scheme.onSurface,
+                fontSize = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = buildString {
+                    append(playlist.creator.ifBlank { "网易云音乐" })
+                    if (playlist.trackCount > 0) append(" · ${playlist.trackCount} 首")
+                },
+                color = scheme.onSurfaceSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = !adding,
+                    onClick = onAdd,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                imageVector = MiuixIcons.Add,
+                contentDescription = "添加到歌单",
+                modifier = Modifier.size(22.dp).graphicsLayer { alpha = if (adding) 0.35f else 1f },
+                colorFilter = ColorFilter.tint(scheme.onSurfaceSecondary),
+            )
+        }
+    }
+}
+
+@Composable
 private fun RecommendCard(
     song: Song,
     modifier: Modifier = Modifier,
@@ -779,6 +927,7 @@ private fun RecommendCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    val advancedMaterial = LocalAdvancedMaterialEnabled.current
 
     val bounce = rememberChipBounce(interactionSource)
     val highlightAlpha by animateFloatAsState(
@@ -805,6 +954,34 @@ private fun RecommendCard(
             maxSize = CoverSize.MEDIUM.decode,
             pinned = true,
         )
+        if (advancedMaterial) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(38.dp, edgeTreatment = BlurredEdgeTreatment.Rectangle)
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                colorStops = arrayOf(
+                                    0.58f to Color.Transparent,
+                                    0.74f to Color.Black,
+                                    1.0f to Color.Black,
+                                )
+                            ),
+                            blendMode = BlendMode.DstIn,
+                        )
+                    },
+            ) {
+                NetCover(
+                    url = song.cover.ifBlank { null },
+                    modifier = Modifier.fillMaxSize(),
+                    corner = 0.dp,
+                    maxSize = CoverSize.MEDIUM.decode,
+                    pinned = true,
+                )
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -812,7 +989,7 @@ private fun RecommendCard(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
                             0.45f to Color.Transparent,
-                            1.0f to Color.Black.copy(alpha = 0.62f),
+                            1.0f to Color.Black.copy(alpha = if (advancedMaterial) 0.40f else 0.62f),
                         )
                     )
                 ),

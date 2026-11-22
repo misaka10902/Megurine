@@ -180,7 +180,6 @@ fun CommentsContent(song: Song, onBack: () -> Unit) {
                     }
                 }
 
-
                 else -> Column(
                     modifier = Modifier
                         .fillMaxWidth()

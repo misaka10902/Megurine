@@ -23,13 +23,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.viewinterop.AndroidView
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-
 @Stable
 class NativeTextFieldHandle {
     internal var editText: EditText? = null
     fun requestFocus() { editText?.requestFocus() }
     fun clearFocus() { editText?.clearFocus() }
-
 
     fun requestFocusAndShowIme() {
         val view = editText ?: return
@@ -38,6 +36,13 @@ class NativeTextFieldHandle {
             val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
             imm?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
         }
+    }
+
+    fun hideIme() {
+        val view = editText ?: return
+        view.clearFocus()
+        val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.hideSoftInputFromWindow(view.windowToken, 0)
     }
 }
 

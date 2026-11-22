@@ -1,7 +1,5 @@
 package com.hyper.music.music
 
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -12,6 +10,7 @@ data class SearchArtist(
     val id: String,
     val name: String,
     val avatar: String,
+    val songCount: Int = 0,
 )
 
 data class SearchAlbum(
@@ -19,6 +18,20 @@ data class SearchAlbum(
     val name: String,
     val artist: String,
     val cover: String,
+)
+
+data class SearchPlaylist(
+    val id: String,
+    val name: String,
+    val creator: String,
+    val trackCount: Int,
+    val cover: String = "",
+)
+
+data class OnlinePlaylistInfo(
+    val name: String,
+    val cover: String,
+    val songs: List<Song>,
 )
 
 object GdApi {
@@ -32,27 +45,49 @@ object GdApi {
 
     suspend fun search(keyword: String, count: Int = 30, page: Int = 1): List<Song> {
         if (keyword.isBlank()) return emptyList()
-        val official = runCatching { NeteaseApi.search(keyword, count, page) }
+        val official = runCatching { MusicApi.search(keyword, count, page) }
             .getOrDefault(emptyList())
         val list = if (official.isNotEmpty()) official else ApiBridge.search(keyword, count, page)
-        return list.distinctBy { it.id }
+        return SearchRank.rank(list.distinctBy { it.id }, keyword)
+    }
+
+    suspend fun searchBilibili(
+        keyword: String,
+        count: Int = 30,
+        page: Int = 1,
+    ): List<Song> {
+        val settings = MusicLibrary.settings.value
+        if (!settings.biliEnabled) return emptyList()
+        val kw = keyword.trim()
+        if (kw.isBlank()) return emptyList()
+        val suffix = settings.biliKeywords.trim()
+        return BiliApi.search(if (suffix.isEmpty()) kw else "$kw $suffix", count, page)
     }
 
     suspend fun searchArtists(keyword: String, limit: Int = 20): List<SearchArtist> =
-        NeteaseApi.searchArtists(keyword, limit)
+        MusicApi.searchArtists(keyword, limit)
 
     suspend fun searchAlbums(keyword: String, limit: Int = 20): List<SearchAlbum> =
-        NeteaseApi.searchAlbums(keyword, limit)
+        MusicApi.searchAlbums(keyword, limit)
 
     fun streamEndpoint(id: String, br: Int, source: String = SOURCE): String =
         "${base()}?types=url&source=$source&id=$id&br=$br"
 
-    suspend fun artistSongs(artistName: String, count: Int = 30, page: Int = 1): List<Song> {
-        val keyword = artistName.trim()
-        if (keyword.isBlank()) return emptyList()
-        val all = search(keyword, count, page)
-        val filtered = all.filter { s -> s.artists.any { it.equals(keyword, ignoreCase = true) } }
-        return filtered.ifEmpty { all }
+    suspend fun resolveArtistId(artistName: String): String {
+        val name = artistName.trim()
+        if (name.isBlank()) return ""
+        return runCatching { MusicApi.resolveArtistId(name) }.getOrDefault("")
+    }
+
+    suspend fun artistSongsById(
+        artistId: String,
+        artistName: String = "",
+        count: Int = 30,
+        page: Int = 1,
+    ): List<Song> {
+        return runCatching {
+            MusicApi.artistSongsById(artistId, artistName, (page - 1) * count, count)
+        }.getOrDefault(emptyList())
     }
 
     suspend fun albumSongs(
@@ -64,43 +99,55 @@ object GdApi {
         val keyword = albumName.trim()
         if (keyword.isBlank()) return emptyList()
         val artist = artistName.trim()
+        val target = MusicApi.normalizeName(keyword)
 
         runCatching {
-            val albumId = NeteaseApi.searchAlbumId(keyword, artist)
-            if (albumId != null) NeteaseApi.albumDetail(albumId) else emptyList()
+            val albumId = MusicApi.searchAlbumId(keyword, artist)
+            if (albumId != null) MusicApi.albumDetail(albumId) else emptyList()
         }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
 
         if (artist.isNotEmpty() && !artist.startsWith("未知")) {
+            val aTarget = MusicApi.normalizeName(artist)
             val combined = search("$artist $keyword", count, page)
-            val matched = combined.filter { it.album.equals(keyword, ignoreCase = true) }
-            if (matched.isNotEmpty()) return matched
+            val matched = combined.filter { MusicApi.similarity(target, MusicApi.normalizeName(it.album)) >= 0.6f }
+            if (matched.isNotEmpty()) {
+                val ranked = matched.sortedByDescending { s ->
+                    s.artists.maxOfOrNull { MusicApi.similarity(aTarget, MusicApi.normalizeName(it)) } ?: 0f
+                }
+                return ranked
+            }
         }
 
         val all = search(keyword, count, page)
-        val filtered = all.filter { it.album.equals(keyword, ignoreCase = true) }
+        val filtered = all.filter { MusicApi.similarity(target, MusicApi.normalizeName(it.album)) >= 0.6f }
         return filtered.ifEmpty { all }
     }
 
     suspend fun resolveStream(song: Song, br: Int): StreamInfo? =
-        ApiBridge.resolveUrl(song.id, br, song.source)
+        if (song.isBili) BiliApi.resolveAudioUrl(song.id)?.let { StreamInfo(it) }
+        else ApiBridge.resolveUrl(song.id, br, song.source)
 
     suspend fun fullLyric(song: Song): LyricResult? {
+        if (song.isBili) return BiliApi.lyric(song.name)
         if (song.lyricId.isBlank()) return null
-        runCatching { NeteaseApi.fullLyric(song.lyricId) }.getOrNull()?.let { return it }
+        runCatching { MusicApi.fullLyric(song.lyricId) }.getOrNull()?.let { return it }
         return nativeFullLyric(song.lyricId, song.source)
             ?: ApiBridge.lyric(song.lyricId, song.source)?.let { LyricResult(it, "") }
     }
 
     fun picUrl(picId: String, size: Int = 300, source: String = SOURCE): String {
         if (picId.isBlank()) return ""
+        if (source == BiliApi.SOURCE) return BiliApi.coverUrl(picId)
+        if (picId.startsWith("http")) return picId.replaceFirst("http://", "https://")
+        if (picId.startsWith("//")) return "https:$picId"
         return "${base()}?types=pic&source=$source&id=$picId&size=$size"
     }
 
-    suspend fun artistAvatar(name: String): String = NeteaseApi.artistAvatar(name)
+    suspend fun artistAvatar(name: String, artistId: String = ""): String =
+        MusicApi.artistAvatar(name, artistId)
 
     fun coverUrl(song: Song, size: Int = 300): String {
         if (song.cover.isNotBlank()) {
-
             if (song.cover.startsWith("file://") ||
                 song.cover.startsWith("content://") ||
                 song.cover.startsWith("/")
@@ -114,11 +161,25 @@ object GdApi {
         return picUrl(song.picId, size, song.source)
     }
 
-    fun shareUrl(song: Song): String = "https://music.163.com/song?id=${song.id}"
+    fun sizedCover(url: String, size: Int = 300): String {
+        if (url.isBlank()) return ""
+        if (url.startsWith("file://") ||
+            url.startsWith("content://") ||
+            url.startsWith("/")
+        ) return url
+        if (!url.startsWith("http", ignoreCase = true)) return url
+        if (url.contains("param=", ignoreCase = true)) return url
+        val sep = if (url.contains("?")) "&" else "?"
+        return "$url${sep}param=${size}y${size}"
+    }
+
+    fun shareUrl(song: Song): String =
+        if (song.isBili) BiliApi.pageUrl(song.id)
+        else "https://music.163.com/song?id=${song.id}"
 
     suspend fun comments(song: Song, cursor: Long, pageNo: Int, pageSize: Int): CommentPage =
         if (song.isLocal || song.id.isBlank()) CommentPage()
-        else NeteaseApi.comments(song.id, cursor, pageNo, pageSize)
+        else MusicApi.comments(song.id, cursor, pageNo, pageSize)
 
     internal fun parseSongsJson(body: String): List<Song> = runCatching {
         val arr = JSONArray(body)
@@ -163,6 +224,9 @@ object GdApi {
         retries: Int = 3,
     ): StreamInfo? =
         withContext(Dispatchers.IO) {
+            if (source == BiliApi.SOURCE) {
+                return@withContext BiliApi.resolveAudioUrl(id)?.let { StreamInfo(it) }
+            }
             val url = "${base()}?types=url&source=$source&id=$id&br=$br"
             val body = getWithRetry(url, timeoutMs = timeoutMs, retries = retries)
                 ?: return@withContext null
@@ -216,24 +280,12 @@ object GdApi {
         return null
     }
 
-    internal fun get(rawUrl: String, timeoutMs: Int = 12_000): String? {
-        var conn: HttpURLConnection? = null
-        return try {
-            conn = (URL(rawUrl).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = timeoutMs
-                readTimeout = timeoutMs
-                setRequestProperty("User-Agent", UA)
-                setRequestProperty("Accept", "application/json, text/plain, */*")
-                instanceFollowRedirects = true
-            }
-            val code = conn.responseCode
-            if (code !in 200..299) return null
-            conn.inputStream.bufferedReader().use { it.readText() }
-        } catch (_: Throwable) {
-            null
-        } finally {
-            conn?.disconnect()
-        }
-    }
+    internal fun get(rawUrl: String, timeoutMs: Int = 12_000): String? =
+        HttpClient.text(
+            rawUrl, timeoutMs, timeoutMs,
+            mapOf(
+                "User-Agent" to UA,
+                "Accept" to "application/json, text/plain, */*",
+            ),
+        )
 }

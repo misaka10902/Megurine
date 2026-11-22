@@ -33,7 +33,6 @@ fun cardGlassEnabled(): Boolean {
     return hasImage
 }
 
-
 @Composable
 fun cardGlassAlpha(): Float {
     val opacity by WallpaperManager.cardOpacityFlow.collectAsState(
@@ -43,7 +42,6 @@ fun cardGlassAlpha(): Float {
     return opacity.coerceIn(WallpaperManager.MIN_CARD_OPACITY, 1f)
 }
 
-
 @Composable
 private fun cardBlurPx(): Float {
     val blur by WallpaperManager.cardBlurFlow.collectAsState(
@@ -52,7 +50,6 @@ private fun cardBlurPx(): Float {
     if (!cardGlassEnabled()) return 0f
     return blur.coerceIn(0f, WallpaperManager.MAX_CARD_BLUR)
 }
-
 
 private class SquircleOutlineShape(
     private val cornerRadius: Dp,
@@ -77,13 +74,11 @@ private class SquircleOutlineShape(
     }
 }
 
-
 @Composable
 fun rememberSquircleShape(cornerRadius: Dp): Shape {
     val enabled = isSquircleEnabled()
     return remember(cornerRadius, enabled) { SquircleOutlineShape(cornerRadius, enabled) }
 }
-
 
 @Composable
 fun Modifier.cardGlass(shape: Shape): Modifier {

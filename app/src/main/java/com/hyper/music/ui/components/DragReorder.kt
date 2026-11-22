@@ -50,17 +50,14 @@ class DragReorderState internal constructor(
     var targetIndex by mutableIntStateOf(-1)
         private set
 
-
     var dragOffset by mutableStateOf(Offset.Zero)
         private set
-
 
     var pointer by mutableStateOf(Offset.Zero)
         private set
 
     var settling by mutableStateOf(false)
         private set
-
 
     var suppressPlacement by mutableStateOf(false)
         private set
@@ -73,12 +70,10 @@ class DragReorderState internal constructor(
     private var pendingFrom = -1
     private var pendingTo = -1
 
-
     private var armedIndex = -1
     fun arm(index: Int) { armedIndex = index }
 
     val isDragging: Boolean get() = draggingIndex >= 0
-
 
     fun start(index: Int, snapshot: () -> List<ReorderGeom>): Boolean {
         if (settling) return false
@@ -95,7 +90,6 @@ class DragReorderState internal constructor(
         return true
     }
 
-
     fun startArmed(snapshot: () -> List<ReorderGeom>): Boolean {
         if (settling) return false
         val idx = armedIndex
@@ -104,13 +98,11 @@ class DragReorderState internal constructor(
         return false
     }
 
-
     fun startFromPoint(position: Offset, snapshot: () -> List<ReorderGeom>): Boolean {
         if (settling) return false
         val snap = snapshot()
         if (snap.isEmpty()) return false
         geoms = snap.sortedBy { it.index }
-
 
         val exact = geoms.firstOrNull { g ->
             val inX = g.width <= 0f || position.x in g.left..(g.left + g.width)
@@ -128,7 +120,6 @@ class DragReorderState internal constructor(
         refresh()
     }
 
-
     fun onViewportScrolled() {
         if (!isDragging || settling) return
         refresh()
@@ -138,12 +129,10 @@ class DragReorderState internal constructor(
         val snap = snapshotProvider()
         if (snap.isNotEmpty()) geoms = snap.sortedBy { it.index }
 
-
         val origin = geoms.firstOrNull { it.index == draggingIndex }
         if (origin != null) {
             dragOffset = Offset(pointer.x - origin.centerX, pointer.y - origin.centerY)
         }
-
 
         var best = draggingIndex
         var bestDist = Float.MAX_VALUE
@@ -167,7 +156,6 @@ class DragReorderState internal constructor(
         val dest = geoms.firstOrNull { it.index == to }
         pendingFrom = from
 
-
         pendingTo = to
         val targetX: Float
         val targetY: Float
@@ -175,7 +163,6 @@ class DragReorderState internal constructor(
             targetX = dest.centerX - origin.centerX
             targetY = dest.centerY - origin.centerY
         } else {
-
 
             targetX = 0f
             targetY = 0f
@@ -256,7 +243,6 @@ fun Modifier.dragReorderItem(
     val dragging = state.isDragging
     val shift = state.offsetFor(index)
 
-
     val shiftSpec = remember(index, state.draggingIndex) {
         val distance = kotlin.math.abs(index - state.draggingIndex)
         tween<Float>(
@@ -282,7 +268,6 @@ fun Modifier.dragReorderItem(
         animationSpec = reorderSpring(),
         label = "reorderLift",
     )
-
 
     val currentIndex by rememberUpdatedState(index)
     val reportIndex = if (enabled) Modifier.pointerInput(id) {
@@ -313,7 +298,6 @@ fun Modifier.dragReorderItem(
             alpha = 1f
         }
 }
-
 
 @Composable
 fun Modifier.dragReorderSurface(

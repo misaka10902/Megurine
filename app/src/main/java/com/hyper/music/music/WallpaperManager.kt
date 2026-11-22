@@ -51,7 +51,6 @@ data class WallpaperState(
     val version: Int = 0,
 )
 
-
 data class RenderedWallpaper(val version: Int, val image: ImageBitmap?)
 
 object WallpaperManager {
@@ -63,7 +62,6 @@ object WallpaperManager {
     private const val FILE_NAME = "wallpaper.jpg"
     private const val MAX_EDGE = 1024
 
-
     private const val BLUR_BASE_EDGE = 360
 
     const val MAX_BLUR = 15f
@@ -74,11 +72,9 @@ object WallpaperManager {
     private val _state = MutableStateFlow(WallpaperState())
     val state: StateFlow<WallpaperState> = _state
 
-
     val cardOpacityFlow = state.map { it.cardOpacity }.distinctUntilChanged()
     val cardBlurFlow = state.map { it.cardBlur }.distinctUntilChanged()
     val hasImageFlow = state.map { it.hasImage }.distinctUntilChanged()
-
 
     private val _render = MutableStateFlow<RenderedWallpaper?>(null)
     val render: StateFlow<RenderedWallpaper?> = _render
@@ -136,7 +132,6 @@ object WallpaperManager {
         _render.value = RenderedWallpaper(version, image)
     }
 
-
     @Volatile
     var shownImage: ImageBitmap? = null
         private set
@@ -149,7 +144,6 @@ object WallpaperManager {
         shownVersion = version
         shownImage = image
     }
-
 
     private var persistJob: Job? = null
 
@@ -243,7 +237,6 @@ object WallpaperManager {
         bitmap
     }
 
-
     fun renderForDraw(src: ImageBitmap, radiusDp: Float, density: Float): ImageBitmap {
         if (radiusDp <= 0.5f) return src
         return runCatching {
@@ -251,7 +244,6 @@ object WallpaperManager {
             val base = blurBaseFor(srcBmp)
             val w = base.width
             val h = base.height
-
 
             val pix = IntArray(w * h)
             base.getPixels(pix, 0, w, 0, 0, w, h)
@@ -281,7 +273,6 @@ object WallpaperManager {
         blurBaseVersion = version
         return bmp
     }
-
 
     private fun boxBlurFractional(pix: IntArray, w: Int, h: Int, radius: Float, passes: Int) {
         if (radius <= 0.01f || w < 3 || h < 3) return
@@ -359,7 +350,6 @@ fun WallpaperBackground() {
     val state by WallpaperManager.state.collectAsState()
     val rendered by WallpaperManager.render.collectAsState()
 
-
     var front by remember {
         mutableStateOf(if (WallpaperManager.state.value.hasImage) WallpaperManager.shownImage else null)
     }
@@ -369,13 +359,11 @@ fun WallpaperBackground() {
     var back by remember { mutableStateOf<ImageBitmap?>(null) }
     val backAlpha = remember { Animatable(0f) }
 
-
     val layerAlpha = remember {
         Animatable(
             if (WallpaperManager.state.value.hasImage && WallpaperManager.shownImage != null) 1f else 0f,
         )
     }
-
 
     val ready = rendered?.image?.takeIf { rendered?.version == state.version }
 
@@ -388,7 +376,6 @@ fun WallpaperBackground() {
         }
         if (ready == null) {
 
-
             if (front == null) {
                 val fallback = kotlinx.coroutines.withContext(Dispatchers.IO) { WallpaperManager.loadBitmap() }
                 if (fallback != null && front == null) front = fallback
@@ -396,7 +383,6 @@ fun WallpaperBackground() {
             return@LaunchedEffect
         }
         if (front == null) {
-
 
             front = ready
             frontVersion = state.version
@@ -421,7 +407,6 @@ fun WallpaperBackground() {
         WallpaperManager.markShown(state.version, ready)
         back = null
     }
-
 
     LaunchedEffect(state.hasImage, front) {
         if (state.hasImage) {
@@ -457,7 +442,6 @@ fun WallpaperBackground() {
         }
     }
 }
-
 
 @Composable
 private fun WallpaperLayer(bitmap: ImageBitmap, dim: Float) {

@@ -23,7 +23,6 @@ import top.yukonga.miuix.kmp.icon.glass.Item
 import top.yukonga.miuix.kmp.icon.glass.SettingsFill
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-
 @Composable
 internal fun HyperBottomBar(
     selectedTab: Int,
@@ -40,8 +39,8 @@ internal fun HyperBottomBar(
     val items = remember {
         listOf(
             GlassNavigationItem(icon = MiuixIcons.Recording, label = "探索", contentDescription = "探索"),
-            GlassNavigationItem(icon = MiuixIcons.WorldClock, label = "历史", contentDescription = "历史"),
             GlassNavigationItem(icon = MiuixIcons.Glass.Item, label = "歌单", contentDescription = "歌单"),
+            GlassNavigationItem(icon = MiuixIcons.WorldClock, label = "历史", contentDescription = "历史"),
             GlassNavigationItem(icon = MiuixIcons.Glass.SettingsFill, label = "设置", contentDescription = "设置"),
         )
     }

@@ -4,8 +4,12 @@ import android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
 import android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -21,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -45,14 +50,11 @@ import com.hyper.music.ui.player.MiniPlayerHeight
 import com.hyper.music.ui.player.MiniPlayerToNavBarSpacing
 import com.hyper.music.ui.utils.horizontalContentPadding
 import top.yukonga.miuix.kmp.utils.overScrollVertical
-import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.BasicComponentColors
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownColors
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -67,16 +69,15 @@ import androidx.compose.runtime.LaunchedEffect
 import android.content.SharedPreferences
 import com.hyper.music.ui.utils.applyThemeAwareSystemBars
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import android.widget.Toast
-import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import com.hyper.music.music.MediaCache
-import com.hyper.music.ui.components.ConfirmDialog
+import top.yukonga.miuix.kmp.basic.NativeTextField
+import top.yukonga.miuix.kmp.basic.rememberNativeTextFieldHandle
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.glass.GlassDialog
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 private const val THEME_PREFS = "app_theme_prefs"
 private const val THEME_MODE = "theme_mode"
@@ -89,19 +90,15 @@ fun SettingsScreen(
     hyperBackdrop: Backdrop? = null,
     onOpenWallpaper: () -> Unit = {},
     onOpenPlayerSettings: () -> Unit = {},
+    onOpenPlaybackSettings: () -> Unit = {},
+    onOpenBiliSourceSettings: () -> Unit = {},
+    onOpenDataSettings: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val musicSettings by MusicLibrary.settings.collectAsState()
     val dropdownColors = rememberDropdownColors()
-
-    val scope = rememberCoroutineScope()
-    var cacheBytes by remember { mutableLongStateOf(0L) }
-    var showClearCacheDialog by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        cacheBytes = withContext(Dispatchers.IO) { MediaCache.usageBytes(context) }
-    }
 
     val themePrefs = remember { context.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE) }
     var themeMode by remember {
@@ -159,8 +156,8 @@ fun SettingsScreen(
         item {
             PlaybackSection(
                 musicSettings = musicSettings,
-                dropdownColors = dropdownColors,
-                hyperBackdrop = hyperBackdrop,
+                onOpenBiliSourceSettings = onOpenBiliSourceSettings,
+                onOpenPlaybackSettings = onOpenPlaybackSettings,
             )
         }
         item {
@@ -190,11 +187,7 @@ fun SettingsScreen(
                 dropdownColors = dropdownColors,
                 hyperBackdrop = hyperBackdrop,
                 onPickFolder = { folderLauncher.launch(Unit) },
-                cacheBytes = cacheBytes,
-                onClearCache = {
-                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                    showClearCacheDialog = true
-                },
+                onOpenDataSettings = onOpenDataSettings,
             )
         }
         item {
@@ -203,26 +196,6 @@ fun SettingsScreen(
             )
         }
     }
-
-    ConfirmDialog(
-        show = showClearCacheDialog,
-        title = "清理缓存",
-        summary = "是否清理本地缓存？",
-        confirmText = "清理",
-        onConfirm = {
-            showClearCacheDialog = false
-            scope.launch {
-                val left = withContext(Dispatchers.IO) {
-                    MediaCache.clear(context)
-                    MediaCache.usageBytes(context)
-                }
-                cacheBytes = left
-                Toast.makeText(context, "缓存已清理", Toast.LENGTH_SHORT).show()
-            }
-        },
-        onDismiss = { showClearCacheDialog = false },
-        backdrop = hyperBackdrop,
-    )
 }
 
 @Composable
@@ -261,75 +234,29 @@ private fun SettingsSection(
 @Composable
 private fun PlaybackSection(
     musicSettings: MusicSettings,
-    dropdownColors: DropdownColors,
-    hyperBackdrop: Backdrop?,
+    onOpenBiliSourceSettings: () -> Unit,
+    onOpenPlaybackSettings: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
-    SettingsSection(title = "播放设置") {
+    SettingsSection(title = "基础") {
         SliderPreference(
             value = musicSettings.volume,
             onValueChange = { v ->
                 MusicLibrary.setVolume(v)
                 PlaybackController.setVolume(v)
             },
-            title = "音量调节",
-            summary = "调整应用播放音量，不影响系统音量",
+            title = "应用音量调节",
             valueText = "${(musicSettings.volume * 100).toInt()}%",
             valueRange = 0f..1f,
             steps = 99,
         )
-        BasicComponent(
-            title = "倍速播放",
-            summary = "调节歌曲播放的速率",
-            bottomAction = {
-                TabRowWithContour(
-                    tabs = MusicSettings.PLAYBACK_SPEED_LABELS,
-                    selectedTabIndex = MusicSettings.PLAYBACK_SPEEDS.indexOf(musicSettings.playbackSpeed)
-                        .coerceAtLeast(0),
-                    onTabSelected = { index ->
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        val speed = MusicSettings.PLAYBACK_SPEEDS[index]
-                        MusicLibrary.setPlaybackSpeed(speed)
-                        PlaybackController.setPlaybackSpeed(speed)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            },
+        ArrowPreference(
+            title = "B站音源设置",
+            onClick = onOpenBiliSourceSettings,
         )
-        OverlayDropdownMenu(
-            title = "播放音质",
-            entry = qualityDropdownEntry(musicSettings, isDownload = false),
-            collapseOnSelection = true,
-            hyperBackdrop = materialBackdrop(hyperBackdrop),
-            dropdownColors = dropdownColors,
-        )
-        SwitchPreference(
-            title = "音频淡入淡出效果",
-            checked = musicSettings.audioFade,
-            onCheckedChange = {
-                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                MusicLibrary.setAudioFade(it)
-            }
-        )
-        SwitchPreference(
-            title = "音频焦点",
-            summary = "当其他应用播放音频时暂停播放，系统的多声音设置会影响此功能",
-            checked = musicSettings.audioFocus,
-            onCheckedChange = {
-                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                MusicLibrary.setAudioFocus(it)
-                PlaybackController.applyAudioFocus()
-            }
-        )
-        SwitchPreference(
-            title = "实时歌词",
-            summary = "在系统媒体控制器实时显示歌词",
-            checked = musicSettings.liveLyric,
-            onCheckedChange = {
-                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                MusicLibrary.setLiveLyric(it)
-                PlaybackController.refreshLiveLyric()
-            }
+        ArrowPreference(
+            title = "播放设置",
+            onClick = onOpenPlaybackSettings,
         )
     }
 }
@@ -347,7 +274,7 @@ private fun InterfaceSection(
     onPickThemeColor: (String) -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
-    SettingsSection(title = "界面设置") {
+    SettingsSection(title = "视觉效果") {
         OverlayDropdownMenu(
             title = "显示模式",
             entry = remember(themeMode) {
@@ -427,7 +354,7 @@ private fun InterfaceSection(
         )
 
         ArrowPreference(
-            title = "播放界面",
+            title = "界面设置",
             onClick = onOpenPlayerSettings,
         )
     }
@@ -439,8 +366,7 @@ private fun DownloadSection(
     dropdownColors: DropdownColors,
     hyperBackdrop: Backdrop?,
     onPickFolder: () -> Unit,
-    cacheBytes: Long,
-    onClearCache: () -> Unit,
+    onOpenDataSettings: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     SettingsSection(
@@ -467,19 +393,8 @@ private fun DownloadSection(
             }
         )
         ArrowPreference(
-            title = "清理缓存",
-            titleColor = BasicComponentColors(
-                color = MiuixTheme.colorScheme.error,
-                disabledColor = MiuixTheme.colorScheme.error.copy(alpha = 0.5f),
-            ),
-            endActions = {
-                Text(
-                    text = String.format(Locale.US, "%.2f MB", cacheBytes / 1024.0 / 1024.0),
-                    fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceSecondary,
-                )
-            },
-            onClick = onClearCache,
+            title = "数据设置",
+            onClick = onOpenDataSettings,
         )
     }
 }
@@ -497,7 +412,7 @@ private fun AboutSection(
 }
 
 @Composable
-private fun qualityDropdownEntry(
+internal fun qualityDropdownEntry(
     musicSettings: MusicSettings,
     isDownload: Boolean,
 ): DropdownEntry {
@@ -528,3 +443,88 @@ private fun qualityDropdownEntry(
 @Composable
 private fun materialBackdrop(backdrop: Backdrop?): Backdrop? =
     backdrop?.takeIf { LocalAdvancedMaterialEnabled.current }
+
+@Composable
+internal fun BiliKeywordDialog(
+    show: Boolean,
+    current: String,
+    backdrop: Backdrop?,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember(show) { mutableStateOf(current) }
+    val haptic = LocalHapticFeedback.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val fieldHandle = rememberNativeTextFieldHandle()
+    val scheme = MiuixTheme.colorScheme
+    GlassDialog(
+        show = show,
+        onDismissRequest = {
+            fieldHandle.hideIme()
+            keyboard?.hide()
+            onDismiss()
+        },
+        title = "设置关键词",
+        backdrop = backdrop?.takeIf { LocalAdvancedMaterialEnabled.current },
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "用空格将关键词分隔开",
+                modifier = Modifier.fillMaxWidth(),
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                color = scheme.onSurfaceSecondary,
+            )
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(scheme.secondaryContainer)
+                    .padding(horizontal = 16.dp, vertical = 15.dp),
+            ) {
+                NativeTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    hint = "输入关键词",
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 16.sp,
+                        color = scheme.onSurface,
+                    ),
+                    singleLine = true,
+                    handle = fieldHandle,
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TextButton(
+                    text = "取消",
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        fieldHandle.hideIme()
+                        keyboard?.hide()
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "确定",
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        fieldHandle.hideIme()
+                        keyboard?.hide()
+                        onConfirm(text.trim())
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                )
+            }
+        }
+    }
+}

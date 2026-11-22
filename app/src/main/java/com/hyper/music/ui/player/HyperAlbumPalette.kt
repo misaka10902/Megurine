@@ -14,6 +14,7 @@ data class AlbumPalette(
     val middle: androidx.compose.ui.graphics.Color,
     val bottom: androidx.compose.ui.graphics.Color,
     val accent: androidx.compose.ui.graphics.Color,
+    val flow: List<androidx.compose.ui.graphics.Color> = emptyList(),
 )
 
 object AlbumPaletteExtractor {
@@ -45,16 +46,18 @@ object AlbumPaletteExtractor {
         }
         if (buckets.isEmpty()) return null
 
-        val dominantArgb = bestColor(buckets, null)
-        val secondaryArgb = bestColor(buckets, dominantArgb)
-        return buildPalette(dominantArgb, secondaryArgb)
+        val dominantArgb = bestColor(buckets, emptyList())
+        val secondaryArgb = bestColor(buckets, listOf(dominantArgb))
+        val thirdArgb = bestColor(buckets, listOf(dominantArgb, secondaryArgb))
+        val fourthArgb = bestColor(buckets, listOf(dominantArgb, secondaryArgb, thirdArgb))
+        return buildPalette(dominantArgb, secondaryArgb, listOf(thirdArgb, fourthArgb))
     }
 
-    private fun bestColor(buckets: HashMap<Int, LongArray>, exclude: Int?): Int {
-        val excludeHsl = if (exclude != null) hslOf(exclude) else FloatArray(3)
+    private fun bestColor(buckets: HashMap<Int, LongArray>, exclude: List<Int>): Int {
+        val excludeHsl = exclude.map { hslOf(it) }
 
         var bestScore = -1f
-        var best = exclude ?: 0
+        var best = exclude.firstOrNull() ?: 0
         for ((_, slot) in buckets) {
             val count = slot[0]
             if (count <= 0L) continue
@@ -75,8 +78,11 @@ object AlbumPaletteExtractor {
             }
             var score = count * (0.28f + saturation * 1.6f) * lightnessWeight
 
-            if (exclude != null) {
-                val hueDelta = abs(hsl[0] - excludeHsl[0]).let { min(it, 360f - it) }
+            if (excludeHsl.isNotEmpty()) {
+                var hueDelta = 360f
+                excludeHsl.forEach { ex ->
+                    hueDelta = min(hueDelta, abs(hsl[0] - ex[0]).let { min(it, 360f - it) })
+                }
                 score *= when {
                     hueDelta < 18f -> 0.02f
                     hueDelta < 40f -> 0.35f
@@ -91,7 +97,11 @@ object AlbumPaletteExtractor {
         return best
     }
 
-    private fun buildPalette(dominantArgb: Int, secondaryArgb: Int): AlbumPalette {
+    private fun buildPalette(
+        dominantArgb: Int,
+        secondaryArgb: Int,
+        extraArgb: List<Int>,
+    ): AlbumPalette {
         val hsl = hslOf(dominantArgb)
         val hue = hsl[0]
         val saturation = hsl[1].coerceIn(0.18f, 0.92f)
@@ -116,6 +126,10 @@ object AlbumPaletteExtractor {
             accent = androidx.compose.ui.graphics.Color(
                 hslToColor(hue, max(saturation, 0.55f).coerceAtMost(0.95f), 0.68f)
             ),
+            flow = listOf(
+                androidx.compose.ui.graphics.Color(dominantArgb),
+                androidx.compose.ui.graphics.Color(secondaryArgb),
+            ) + extraArgb.map { androidx.compose.ui.graphics.Color(it) },
         )
     }
 

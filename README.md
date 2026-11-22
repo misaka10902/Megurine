@@ -1,9 +1,9 @@
 <div align="center">
 
-<img src="assets/icon.png" alt="澎湃音乐图标" width="96">  
+<img src="assets/icon.png" alt="寻音图标" width="96">  
 
 
-# [澎湃音乐](https://github.com/misaka10902/HyperMusic)
+# [寻音](https://github.com/misaka10902/HyperMusic)
 
 #### 这是你想象中的小米音乐吗？
 
@@ -15,7 +15,7 @@
 
 ## 项目简介
 
-澎湃音乐是一款基于 Jetpack Compose、Compose Miuix 和 AndroidX Media3 构建的 Android 在线音乐播放器，通过 GD Studio API 获取在线音源，界面设计和交互全面契合小米澎湃OS，为小米用户带来更一致的听歌体验。
+寻音是一款基于 Jetpack Compose、Compose Miuix 和 AndroidX Media3 构建的 Android 在线音乐播放器，通过 GD Studio API 获取在线音源，界面设计和交互全面契合小米澎湃OS，为小米用户带来更一致的听歌体验。
 
 ## ⚠⚠声明⚠⚠
 
@@ -60,12 +60,18 @@
     <td><img src="./assets/15.png" width="200" alt="03"></td>  
     <td><img src="./assets/16.png" width="200" alt="04"></td>  
   </tr>  
+  <tr>  
+    <td><img src="./assets/17.png" width="200" alt="05"></td>  
+    <td><img src="./assets/18.png" width="200" alt="06"></td>  
+    <td><img src="./assets/19.png" width="200" alt="07"></td>  
+    <td><img src="./assets/20.png" width="200" alt="08"></td>  
+  </tr>  
 </table>
 
 <table>  
   <tr>  
-    <td><img src="./assets/17.jpg" width="400" alt="05"></td>  
-    <td><img src="./assets/18.jpg" width="400" alt="06"></td>  
+    <td><img src="./assets/21.jpg" width="400" alt="09"></td>  
+    <td><img src="./assets/22.jpg" width="400" alt="10"></td>  
   </tr>  
 </table>
 

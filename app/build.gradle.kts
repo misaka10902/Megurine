@@ -8,15 +8,14 @@ plugins {
 android {
     namespace = "com.hyper.music"
     compileSdk = 37
-    // miuix 0.9.5-beta01 的 AAR 元数据要求 minCompileMinorSdk=2（即 API 37.2）
     compileSdkMinor = 2
 
     defaultConfig {
         applicationId = "com.hyper.music"
         minSdk = 33
         targetSdk = 37
-        versionCode = 11
-        versionName = "1.1.1"
+        versionCode = 20
+        versionName = "1.2.0"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -55,9 +54,6 @@ android {
         }
     }
     packaging {
-        // 注意：不要用 packaging.dex.useLegacyPackaging 去压 dex 换体积 ——
-        // dex 保持 Stored（AGP 默认）才能安装时直接 mmap，冷启动最快。
-        // 体积只能靠 R8 真正裁代码，不做这种数字游戏。
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/DEPENDENCIES"
@@ -101,10 +97,6 @@ composeCompiler {
     stabilityConfigurationFiles.set(listOf(project.layout.projectDirectory.file("compose-stability.conf")))
 }
 
-// miuix 0.9.5-beta01 全部改用 maven artifact（glass 在 0.9.5 独立为 miuix-glass-android，
-// GlassShape/GlassShadow 等移入 miuix-material-android）。自研的轻量组件以源码形式保留在
-// com.hyper.music.ui 下及 top.yukonga.miuix.kmp.basic 中的 NativeTextField。
-
 dependencies {
 
     implementation(platform(libs.androidx.compose.bom))
@@ -130,7 +122,6 @@ dependencies {
 
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
-    // miuix-core 由 miuix-ui 以 compile scope 传递引入，这里不再重复声明。
     implementation(libs.miuix.ui)
     implementation(libs.miuix.material)
     implementation(libs.miuix.blur)
@@ -142,12 +133,6 @@ dependencies {
     implementation(libs.miuix.nav)
 
     implementation(libs.navigationevent.compose)
-
-    // 说明：以下三项经源码 import 全量核对后确认未被直接使用，已移除：
-    //   androidx.lifecycle:lifecycle-viewmodel-compose
-    //   androidx.savedstate:savedstate-compose
-    //   org.jetbrains:annotations（纯编译期注解，运行时无 class 依赖）
-    // 若后续新增 ViewModel/SavedState 用法，再按需加回。
 
     implementation("androidx.media3:media3-exoplayer:1.10.1")
 

@@ -4,8 +4,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 
 enum class AudioFormat { MP3, FLAC, OTHER }
 
@@ -65,16 +63,10 @@ private suspend fun fetchEmbedLyric(song: Song): String? = runCatching {
     if (translation.isBlank()) lyric else lyric + TLYRIC_DELIMITER + translation
 }.getOrNull()
 
-private fun fetchBytes(url: String): ByteArray? = runCatching {
-    val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15_000
-        readTimeout = 30_000
-        setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
-        instanceFollowRedirects = true
-    }
-    if (conn.responseCode !in 200..299) return null
-    conn.inputStream.use { it.readBytes() }
-}.getOrNull()
+private fun fetchBytes(url: String): ByteArray? = HttpClient.bytes(
+    url, 15_000, 30_000,
+    mapOf("User-Agent" to "Mozilla/5.0 (Linux; Android 14)"),
+)
 
 fun probeAudio(file: File): AudioFormat {
     val h = ByteArray(12)

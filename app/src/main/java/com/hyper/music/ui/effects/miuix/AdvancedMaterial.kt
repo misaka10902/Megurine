@@ -9,9 +9,7 @@ import top.yukonga.miuix.kmp.blur.Backdrop
 
 val LocalAdvancedMaterialEnabled = staticCompositionLocalOf { true }
 
-
 val LocalActiveBackdrop = staticCompositionLocalOf<Backdrop?> { null }
-
 
 val LocalPageBackdrop = staticCompositionLocalOf<androidx.compose.runtime.State<Backdrop?>?> { null }
 
@@ -20,7 +18,6 @@ fun rememberAdvancedMaterialEnabled(): Boolean {
     val settings by MusicLibrary.settings.collectAsState()
     return settings.advancedMaterial
 }
-
 
 @Composable
 fun rememberPopupBackdrop(): Backdrop? =

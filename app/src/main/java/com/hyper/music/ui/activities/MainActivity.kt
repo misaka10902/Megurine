@@ -2,6 +2,10 @@ package com.hyper.music.ui.activities
 import androidx.compose.ui.graphics.takeOrElse
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.glass.GlassIconButton
+import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
+import top.yukonga.miuix.kmp.glass.glassPopupAnchor
+import top.yukonga.miuix.kmp.glass.glassPopupAnchorContent
+import top.yukonga.miuix.kmp.glass.rememberGlassPopupAnchor
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 
 import android.Manifest
@@ -73,12 +77,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -86,6 +89,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -99,6 +108,8 @@ import com.hyper.music.music.AudioQuality
 import com.hyper.music.music.Downloader
 import com.hyper.music.music.GdApi
 import com.hyper.music.music.MusicLibrary
+import com.hyper.music.music.PlaylistCoverStore
+import com.hyper.music.music.ListenMoeController
 import com.hyper.music.music.PlaybackController
 import com.hyper.music.music.PlaybackService
 import com.hyper.music.music.Playlist
@@ -129,6 +140,7 @@ import com.hyper.music.ui.effects.miuix.rememberAdvancedMaterialEnabled
 import com.hyper.music.ui.player.BottomBarAreaHeight
 import com.hyper.music.ui.player.HyperMiniPlayer
 import com.hyper.music.ui.player.HyperPlayerLayer
+import com.hyper.music.ui.player.PlayerArtwork
 import com.hyper.music.ui.player.MiniPlayerHeight
 import com.hyper.music.ui.player.MiniPlayerWidthFraction
 import com.hyper.music.ui.player.MiniPlayerToNavBarSpacing
@@ -136,17 +148,21 @@ import com.hyper.music.ui.player.rememberHyperPlayerState
 import com.hyper.music.ui.screens.AlbumScreen
 import com.hyper.music.ui.screens.AboutAppScreen
 import com.hyper.music.ui.screens.ArtistScreen
+import com.hyper.music.ui.screens.DataSettingsScreen
 import com.hyper.music.ui.screens.DownloadsScreen
 import com.hyper.music.ui.screens.ExploreScreen
 import com.hyper.music.ui.screens.FavoritesScreen
 import com.hyper.music.ui.screens.HistoryScreen
 import com.hyper.music.ui.screens.HyperSearchScreen
 import com.hyper.music.ui.screens.PlaylistDetailScreen
+import com.hyper.music.ui.screens.OnlinePlaylistScreen
 import com.hyper.music.ui.search.GlassSearchOverlay
 import com.hyper.music.ui.search.rememberGlassSearchBarAlpha
 import com.hyper.music.ui.search.glassSearchBarTransition
 import com.hyper.music.ui.screens.PlaylistScreen
 import com.hyper.music.ui.screens.PlayerSettingsScreen
+import com.hyper.music.ui.screens.BiliSourceSettingsScreen
+import com.hyper.music.ui.screens.PlaybackSettingsScreen
 import com.hyper.music.ui.screens.SettingsScreen
 import com.hyper.music.ui.screens.WallpaperScreen
 import com.hyper.music.ui.theme.CourseHyperTheme
@@ -161,18 +177,23 @@ import top.yukonga.miuix.kmp.basic.NativeTextField
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.PlainTooltip
+import top.yukonga.miuix.kmp.basic.TooltipBox
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.glass.NotInterested
 import top.yukonga.miuix.kmp.icon.glass.Search
+import top.yukonga.miuix.kmp.icon.glass.ScreenSize
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Favorites
 import top.yukonga.miuix.kmp.glass.GlassDialog
 import top.yukonga.miuix.kmp.glass.GlassTopAppBar
+import top.yukonga.miuix.kmp.basic.rememberTooltipState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.springAnimateToPage
@@ -188,17 +209,24 @@ import com.hyper.music.ui.components.SheetCard
 import com.hyper.music.ui.components.SheetHeader
 import top.yukonga.miuix.kmp.nav.core.navBackStackOf
 
-private val TAB_TITLES = listOf("探索", "历史", "歌单", "设置")
-
+private val TAB_TITLES = listOf("探索", "歌单", "历史", "设置")
 
 private sealed interface MusicRoute : NavKey {
     val navId: Long
-    data class Artist(val name: String, override val navId: Long = 0L) : MusicRoute
+    data class Artist(val name: String, val id: String = "", override val navId: Long = 0L) : MusicRoute
     data class Album(val name: String, val artist: String, override val navId: Long = 0L) : MusicRoute
     data class PlaylistDetail(val playlistId: String, override val navId: Long = 0L) : MusicRoute
+    data class OnlinePlaylist(
+        val playlistId: String,
+        val playlistName: String,
+        override val navId: Long = 0L,
+    ) : MusicRoute
     data class Favorites(override val navId: Long = 0L) : MusicRoute
     data class Wallpaper(override val navId: Long = 0L) : MusicRoute
     data class PlayerSettings(override val navId: Long = 0L) : MusicRoute
+    data class PlaybackSettings(override val navId: Long = 0L) : MusicRoute
+    data class BiliSourceSettings(override val navId: Long = 0L) : MusicRoute
+    data class DataSettings(override val navId: Long = 0L) : MusicRoute
     data class Downloads(override val navId: Long = 0L) : MusicRoute
     data class AboutApp(override val navId: Long = 0L) : MusicRoute
 }
@@ -245,7 +273,6 @@ fun HyperApp() {
 
     var selectedTab by remember { mutableIntStateOf(0) }
 
-
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 4 })
     val pagerFlingBehavior = PagerDefaults.flingBehavior(
         state = pagerState,
@@ -279,6 +306,7 @@ fun HyperApp() {
     }
 
     var searchExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     val searchBarAlpha = rememberGlassSearchBarAlpha(searchExpanded)
     val scrollBehavior = MiuixScrollBehavior()
     val exploreScrollBehavior = MiuixScrollBehavior()
@@ -286,6 +314,10 @@ fun HyperApp() {
     val playlistScrollBehavior = MiuixScrollBehavior()
 
     val playerState = rememberHyperPlayerState()
+    val playerCoverUrl = playerState.track.coverUrl
+    LaunchedEffect(playerCoverUrl) {
+        if (!playerCoverUrl.isNullOrBlank()) PlayerArtwork.prefetch(playerCoverUrl)
+    }
 
     val navBackStack = remember { navBackStackOf(RootRoute) }
     var routeSeq by remember { mutableStateOf(0L) }
@@ -295,9 +327,13 @@ fun HyperApp() {
             is MusicRoute.Artist -> target.copy(navId = ++routeSeq)
             is MusicRoute.Album -> target.copy(navId = ++routeSeq)
             is MusicRoute.PlaylistDetail -> target.copy(navId = ++routeSeq)
+            is MusicRoute.OnlinePlaylist -> target.copy(navId = ++routeSeq)
             is MusicRoute.Favorites -> target.copy(navId = ++routeSeq)
             is MusicRoute.Wallpaper -> target.copy(navId = ++routeSeq)
             is MusicRoute.PlayerSettings -> target.copy(navId = ++routeSeq)
+            is MusicRoute.PlaybackSettings -> target.copy(navId = ++routeSeq)
+            is MusicRoute.BiliSourceSettings -> target.copy(navId = ++routeSeq)
+            is MusicRoute.DataSettings -> target.copy(navId = ++routeSeq)
             is MusicRoute.Downloads -> target.copy(navId = ++routeSeq)
             is MusicRoute.AboutApp -> target.copy(navId = ++routeSeq)
         }
@@ -314,6 +350,7 @@ fun HyperApp() {
     var moreSong by remember { mutableStateOf<Song?>(null) }
     var moreDelete by remember { mutableStateOf<((Song) -> Unit)?>(null) }
     var moreDeleteLabel by remember { mutableStateOf("删除歌曲") }
+    var moreDeleteIcon by remember { mutableStateOf<ImageVector>(MiuixIcons.Delete) }
     var moreFromFavorites by remember { mutableStateOf(false) }
     var artistPickerSong by remember { mutableStateOf<Song?>(null) }
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -331,9 +368,8 @@ fun HyperApp() {
     var pickerSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
     var exportJson by remember { mutableStateOf<String?>(null) }
 
-
     var addMenuExpanded by remember { mutableStateOf(false) }
-    var addMenuAnchor by remember { mutableStateOf(Rect.Zero) }
+    val addMenuAnchor = rememberGlassPopupAnchor()
     var showLinkImport by remember { mutableStateOf(false) }
     var linkImportBusy by remember { mutableStateOf(false) }
     var linkImportStatus by remember { mutableStateOf<String?>(null) }
@@ -379,8 +415,8 @@ fun HyperApp() {
     DisposableEffect(context) {
         val owner = context as? androidx.lifecycle.LifecycleOwner
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && playerState.isExpanded) {
-                hideKeyboard()
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                if (playerState.isExpanded) hideKeyboard()
             }
         }
         owner?.lifecycle?.addObserver(obs)
@@ -392,10 +428,12 @@ fun HyperApp() {
         delete: ((Song) -> Unit)?,
         label: String,
         fromFavorites: Boolean = false,
+        deleteIcon: ImageVector = MiuixIcons.Delete,
     ) {
         hideKeyboard()
         moreDelete = delete
         moreDeleteLabel = label
+        moreDeleteIcon = deleteIcon
         moreFromFavorites = fromFavorites
         moreSong = song
     }
@@ -414,6 +452,7 @@ fun HyperApp() {
                 MusicLibrary.removeByLocalUri(uris)
                 PlaybackController.removeByLocalUri(uris)
                 MediaCache.removeByLocalUris(context, uris)
+                LocalSongs.notifyChanged()
             }
             pendingDirectDelete = emptyList()
             pendingMediaDelete = emptyList()
@@ -473,7 +512,6 @@ fun HyperApp() {
             runCatching { if (future.isDone) future.get().release() }
         }
     }
-
 
     val jsonLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -543,18 +581,15 @@ fun HyperApp() {
     val backgroundColor = MiuixTheme.colorScheme.surface
     val wallpaperActive by WallpaperManager.state.collectAsState()
 
-
     val backdrop = rememberLayerBackdrop {
         drawRect(backgroundColor)
         drawContent()
     }
 
-
     val wallpaperBackdrop = rememberLayerBackdrop {
         drawRect(backgroundColor)
         drawContent()
     }
-
 
     val navDisplayBackdrop = rememberLayerBackdrop {
         drawRect(backgroundColor)
@@ -572,16 +607,13 @@ fun HyperApp() {
     BackHandler(enabled = selectionActive) { exitSelection() }
     BackHandler(enabled = navBackStack.size > 1 && !selectionActive) { popRoute() }
 
-
-    BackHandler(enabled = searchExpanded && !selectionActive) {
+    BackHandler(enabled = searchExpanded && !selectionActive && !playerState.isExpanded) {
         searchExpanded = false
     }
 
     val advancedMaterial = rememberAdvancedMaterialEnabled()
 
-
     val activePageLayer = remember { mutableStateOf<Backdrop?>(backdrop) }
-
 
     val playerPageLayer = rememberLayerBackdrop { drawContent() }
     var pageLayerBeforePlayer by remember { mutableStateOf<Backdrop?>(null) }
@@ -602,7 +634,6 @@ fun HyperApp() {
     @Composable
     fun NavPage(content: @Composable (LayerBackdrop) -> Unit) {
 
-
         val pageSurface = MiuixTheme.colorScheme.surface
         val pageLayer = rememberLayerBackdrop {
             drawRect(pageSurface)
@@ -612,13 +643,11 @@ fun HyperApp() {
             activePageLayer.value = pageLayer
             onDispose {
 
-
                 if (activePageLayer.value === pageLayer) activePageLayer.value = backdrop
             }
         }
         content(pageLayer)
     }
-
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -639,7 +668,6 @@ fun HyperApp() {
                 .layerBackdrop(navDisplayBackdrop),
         ) {
 
-
         WallpaperBackground()
         CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides noPredictiveBackOwner) {
         NavDisplay(
@@ -648,9 +676,7 @@ fun HyperApp() {
             modifier = Modifier
                 .fillMaxSize()
 
-
                 .graphicsLayer { alpha = searchBarAlpha.value }
-
 
                 .then(
                     if (route is MusicRoute.AboutApp) {
@@ -662,7 +688,6 @@ fun HyperApp() {
                         )
                     }
                 ),
-
 
             onBack = {
                 if (selectionActive) exitSelection() else popRoute()
@@ -676,7 +701,6 @@ fun HyperApp() {
             ),
         ) {
             entry<RootRoute> {
-
 
     val barTitle = if (selectionActive) {
         "已选择 ${selectionBar?.count ?: 0} 项"
@@ -700,12 +724,32 @@ fun HyperApp() {
         }
     }
 
-
     var actionsSnapshot by remember { mutableStateOf<SelectionBarState?>(null) }
     LaunchedEffect(selectionBar) {
         if (selectionBar != null) actionsSnapshot = selectionBar
     }
 
+    val tipDensity = LocalDensity.current
+    val tipMarginPx = with(tipDensity) { 4.dp.roundToPx() }
+    val tipSpacingPx = with(tipDensity) { 8.dp.roundToPx() }
+    val tipProvider = remember(tipMarginPx, tipSpacingPx) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(
+                anchorBounds: IntRect,
+                windowSize: IntSize,
+                layoutDirection: LayoutDirection,
+                popupContentSize: IntSize,
+            ): IntOffset {
+                val maxX = (windowSize.width - popupContentSize.width - tipMarginPx)
+                    .coerceAtLeast(tipMarginPx)
+                val x = (anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2)
+                    .coerceIn(tipMarginPx, maxX)
+                val y = (anchorBounds.bottom + tipSpacingPx)
+                    .coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0))
+                return IntOffset(x, y)
+            }
+        }
+    }
 
     val topActionsContent: (@Composable () -> Unit) = {
         AnimatedContent(
@@ -741,7 +785,6 @@ fun HyperApp() {
                             )
                         }
 
-
                         if (extra != null) Spacer(Modifier.width(10.dp))
                     }
 
@@ -764,9 +807,56 @@ fun HyperApp() {
             } else {
                 when (selectedTab) {
 
-                    0 -> {}
+                    0 -> TooltipBox(
+                        positionProvider = tipProvider,
+                        tooltip = {
+                            PlainTooltip {
+                                Text(
+                                    text = "不知道听什么？收听来自LISTEN.moe的在线歌曲吧",
+                                    style = MiuixTheme.textStyles.body2,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        },
+                        state = rememberTooltipState(),
+                    ) {
+                        GlassIconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                ListenMoeController.enter()
+                                playerState.expand()
+                            },
+                        ) {
+                            Icon(
+                                imageVector = MiuixIcons.Glass.ScreenSize,
+                                contentDescription = "LISTEN.moe",
+                                modifier = Modifier.size(24.dp),
+                                tint = MiuixTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
 
                     1 -> GlassIconButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            addMenuExpanded = !addMenuExpanded
+                        },
+                        modifier = Modifier.glassPopupAnchor(
+                            anchor = addMenuAnchor,
+                            cornerRadius = GlassTopAppBarDefaults.ButtonSize / 2,
+                            floating = true,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Add,
+                            contentDescription = "添加歌单",
+                            modifier = Modifier.size(23.dp).glassPopupAnchorContent(addMenuAnchor),
+                            tint = MiuixTheme.colorScheme.onSurface,
+                        )
+                    }
+
+                    2 -> GlassIconButton(
                         onClick = {
                             if (MusicLibrary.history.value.isEmpty()) return@GlassIconButton
                             haptic.performHapticFeedback(HapticFeedbackType.Confirm)
@@ -780,27 +870,10 @@ fun HyperApp() {
                             tint = MiuixTheme.colorScheme.onSurface,
                         )
                     }
-
-                    2 -> GlassIconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                            addMenuExpanded = true
-                        },
-
-                        modifier = Modifier.onGloballyPositioned { addMenuAnchor = it.boundsInWindow() },
-                    ) {
-                        Icon(
-                            imageVector = MiuixIcons.Add,
-                            contentDescription = "添加歌单",
-                            modifier = Modifier.size(23.dp),
-                            tint = MiuixTheme.colorScheme.onSurface,
-                        )
-                    }
                 }
             }
         }
     }
-
 
                 Scaffold(
                     modifier = Modifier
@@ -809,15 +882,15 @@ fun HyperApp() {
                     topBar = {
                         val barScrollBehavior = when (selectedTab) {
                             0 -> exploreScrollBehavior
-                            1 -> historyScrollBehavior
-                            2 -> playlistScrollBehavior
+                            1 -> playlistScrollBehavior
+                            2 -> historyScrollBehavior
                             else -> scrollBehavior
                         }
                         GlassTopAppBar(
                             title = shownTitle,
                             largeTitle = shownTitle,
                             subtitle = "",
-                            backdrop = backdrop,
+                            backdrop = if (advancedMaterial) backdrop else null,
                             progressiveBlur = advancedMaterial,
                             scrollBehavior = barScrollBehavior,
                             titleAlpha = { titleSwapAlpha.value },
@@ -864,7 +937,6 @@ fun HyperApp() {
                                 .background(backgroundColor),
                         )
 
-
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -876,7 +948,6 @@ fun HyperApp() {
                             state = pagerState,
                             modifier = Modifier.fillMaxSize(),
 
-
                             flingBehavior = pagerFlingBehavior,
 
                             beyondViewportPageCount = 3,
@@ -886,7 +957,7 @@ fun HyperApp() {
                             0 -> ExploreScreen(
                                 onPlaySongs = { list, index -> playList(list, index) },
                                 onMore = { song -> openMore(song, null, "删除歌曲") },
-                                onOpenArtist = { name -> pushRoute(MusicRoute.Artist(name)) },
+                                onOpenArtist = { name, id -> pushRoute(MusicRoute.Artist(name, id)) },
                                 onOpenAlbum = { name, artist -> pushRoute(MusicRoute.Album(name, artist)) },
                                 onOpenFavorites = {
                                     playerState.collapse()
@@ -901,7 +972,7 @@ fun HyperApp() {
                                 scrollBehavior = exploreScrollBehavior,
                             )
 
-                            1 -> HistoryScreen(
+                            2 -> HistoryScreen(
                                 onPlay = { list, index -> playList(list, index) },
                                 onMore = { song ->
                                     openMore(song, { s -> confirmDeleteHistory = s }, "从历史记录中删除")
@@ -928,7 +999,7 @@ fun HyperApp() {
                                 },
                             )
 
-                            2 -> PlaylistScreen(
+                            1 -> PlaylistScreen(
                                 onOpen = { playlist -> pushRoute(MusicRoute.PlaylistDetail(playlistId = playlist.id)) },
                                 onCreate = {
                                     createForSongs = emptyList()
@@ -953,6 +1024,18 @@ fun HyperApp() {
                                     playerState.collapse()
                                     pushRoute(MusicRoute.PlayerSettings())
                                 },
+                                onOpenPlaybackSettings = {
+                                    playerState.collapse()
+                                    pushRoute(MusicRoute.PlaybackSettings())
+                                },
+                                onOpenBiliSourceSettings = {
+                                    playerState.collapse()
+                                    pushRoute(MusicRoute.BiliSourceSettings())
+                                },
+                                onOpenDataSettings = {
+                                    playerState.collapse()
+                                    pushRoute(MusicRoute.DataSettings())
+                                },
                                 onOpenAbout = {
                                     playerState.collapse()
                                     pushRoute(MusicRoute.AboutApp())
@@ -969,6 +1052,7 @@ fun HyperApp() {
                 NavPage { pageBackdrop ->
                     ArtistScreen(
                         artistName = current.name,
+                        artistId = current.id,
                         onBack = { popRoute() },
                         backdrop = pageBackdrop,
                         onPlay = { list, index -> playList(list, index) },
@@ -1021,6 +1105,18 @@ fun HyperApp() {
                     )
                 }
             }
+            entry<MusicRoute.OnlinePlaylist> { current ->
+                NavPage { pageBackdrop ->
+                    OnlinePlaylistScreen(
+                        playlistId = current.playlistId,
+                        playlistName = current.playlistName,
+                        onBack = { popRoute() },
+                        backdrop = pageBackdrop,
+                        onPlay = { list, index -> playList(list, index) },
+                        onMore = { song -> openMore(song, null, "删除歌曲") },
+                    )
+                }
+            }
             entry<MusicRoute.Wallpaper> {
                 NavPage { pageBackdrop ->
                     WallpaperScreen(
@@ -1032,6 +1128,30 @@ fun HyperApp() {
             entry<MusicRoute.PlayerSettings> {
                 NavPage { pageBackdrop ->
                     PlayerSettingsScreen(
+                        onBack = { popRoute() },
+                        backdrop = pageBackdrop,
+                    )
+                }
+            }
+            entry<MusicRoute.PlaybackSettings> {
+                NavPage { pageBackdrop ->
+                    PlaybackSettingsScreen(
+                        onBack = { popRoute() },
+                        backdrop = pageBackdrop,
+                    )
+                }
+            }
+            entry<MusicRoute.BiliSourceSettings> {
+                NavPage { pageBackdrop ->
+                    BiliSourceSettingsScreen(
+                        onBack = { popRoute() },
+                        backdrop = pageBackdrop,
+                    )
+                }
+            }
+            entry<MusicRoute.DataSettings> {
+                NavPage { pageBackdrop ->
+                    DataSettingsScreen(
                         onBack = { popRoute() },
                         backdrop = pageBackdrop,
                     )
@@ -1049,6 +1169,7 @@ fun HyperApp() {
                                 { s -> MusicLibrary.removeFavorite(s.id) },
                                 "取消收藏",
                                 fromFavorites = true,
+                                deleteIcon = MiuixIcons.Glass.NotInterested,
                             )
                         },
                         onSelectionChange = { selectionBar = it },
@@ -1095,11 +1216,13 @@ fun HyperApp() {
         }
         }
 
-
         GlassSearchOverlay(
             expanded = searchExpanded,
             onDismissRequest = { searchExpanded = false },
-            label = "搜索歌曲、歌手和专辑...",
+            label = "搜索歌曲、歌手、专辑和歌单...",
+            query = searchQuery,
+            onQueryChange = { searchQuery = it },
+            backEnabled = !playerState.isExpanded,
             modifier = Modifier.bottomContentFade(
                 startFromBottom = MiniPlayerToNavBarSpacing + BottomBarAreaHeight + 16.dp,
                 bottomAlpha = 0.12f,
@@ -1107,21 +1230,32 @@ fun HyperApp() {
         ) { q ->
             HyperSearchScreen(
                 query = q,
+                onQueryText = { searchQuery = it },
                 active = searchExpanded,
                 onPlaySongs = { list, index ->
                     playList(list, index)
                     searchExpanded = false
                 },
                 onMore = { song -> openMore(song, null, "删除歌曲") },
-                onOpenArtist = { name ->
+                onOpenArtist = { name, id ->
                     searchExpanded = false
                     playerState.collapse()
-                    pushRoute(MusicRoute.Artist(name))
+                    pushRoute(MusicRoute.Artist(name, id))
                 },
                 onOpenAlbum = { name, artist ->
                     searchExpanded = false
                     playerState.collapse()
                     pushRoute(MusicRoute.Album(name, artist))
+                },
+                onOpenPlaylist = { playlist ->
+                    searchExpanded = false
+                    playerState.collapse()
+                    pushRoute(
+                        MusicRoute.OnlinePlaylist(
+                            playlistId = playlist.id,
+                            playlistName = playlist.name,
+                        )
+                    )
                 },
             )
         }
@@ -1133,7 +1267,7 @@ fun HyperApp() {
             val dockFraction = BottomFloatingWidthFraction
 
             AnimatedVisibility(
-                visible = !selectionActive && route !is MusicRoute.Wallpaper && route !is MusicRoute.PlayerSettings,
+                visible = !selectionActive && route !is MusicRoute.Wallpaper,
                 modifier = Modifier.align(Alignment.BottomCenter),
                 enter = slideInVertically(tween(260)) { it / 2 } + fadeIn(tween(220)),
                 exit = slideOutVertically(tween(240)) { it / 2 } + fadeOut(tween(160)),
@@ -1167,8 +1301,7 @@ fun HyperApp() {
                     exit = slideOutVertically(tween(240, easing = FastOutSlowInEasing)) { it / 2 } + fadeOut(tween(160)),
                 ) {
 
-
-                    val showSearchButton = selectedTab == 0
+                    val showSearchButton = selectedTab == 0 || selectedTab == 1
                     HyperBottomBar(
                         selectedTab = selectedTab,
                         onTabSelected = selectTab,
@@ -1182,7 +1315,7 @@ fun HyperApp() {
                                         searchExpanded = true
                                     },
                                     size = BottomFloatingHeight,
-                                    backdrop = activeBackdrop,
+                                    backdrop = if (advancedMaterial) activeBackdrop else null,
                                 ) {
                                     Icon(
                                         imageVector = MiuixIcons.Glass.Search,
@@ -1271,7 +1404,6 @@ fun HyperApp() {
                 },
                 onOpenAlbum = { song ->
 
-
                     playerState.collapse()
                     searchExpanded = false
                     pushRoute(MusicRoute.Album(song.albumText, song.artists.firstOrNull() ?: ""))
@@ -1279,10 +1411,15 @@ fun HyperApp() {
                 onOpenArtist = { song ->
                     playerState.collapse()
                     searchExpanded = false
-                    if (song.artists.size > 1) {
-                        artistPickerSong = song
-                    } else {
-                        pushRoute(MusicRoute.Artist(song.artistText))
+                    when {
+                        song.artists.size > 1 -> artistPickerSong = song
+                        song.artists.isEmpty() -> pushRoute(MusicRoute.Artist(song.artistText))
+                        else -> pushRoute(
+                            MusicRoute.Artist(
+                                song.artists.first(),
+                                song.artistIds.firstOrNull().orEmpty(),
+                            ),
+                        )
                     }
                 },
                 onChangeQuality = { showQualitySheet = true },
@@ -1306,8 +1443,17 @@ fun HyperApp() {
                     }
                     context.startActivity(Intent.createChooser(intent, "分享歌曲"))
                 },
+                onOpenOriginalVideo = { song ->
+                    runCatching {
+                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(GdApi.shareUrl(song)))
+                        context.startActivity(intent)
+                    }.onFailure {
+                        Toast.makeText(context, "无法打开原视频", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 onDelete = moreDelete,
                 deleteLabel = moreDeleteLabel,
+                deleteIcon = moreDeleteIcon,
             )
 
             PlaylistPickerSheet(
@@ -1332,10 +1478,17 @@ fun HyperApp() {
                 },
             )
 
-
             PlaylistAddMenuPopup(
                 expanded = addMenuExpanded,
-                anchorBounds = addMenuAnchor,
+                anchor = addMenuAnchor,
+                anchorContent = {
+                    Icon(
+                        imageVector = MiuixIcons.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(23.dp),
+                        tint = MiuixTheme.colorScheme.onSurface,
+                    )
+                },
                 backdrop = activeBackdrop,
                 onDismiss = { addMenuExpanded = false },
                 onImportLink = {
@@ -1388,6 +1541,11 @@ fun HyperApp() {
                             val playlist = MusicLibrary.createPlaylist(res.name)
                             var added = 0
                             res.songs.forEach { if (MusicLibrary.addSongToPlaylist(playlist.id, it)) added++ }
+                            if (res.cover.isNotBlank()) {
+                                PlaylistCoverStore.importFromUrl(playlist.id, res.cover)?.let { path ->
+                                    MusicLibrary.setPlaylistCover(playlist.id, path)
+                                }
+                            }
                             Toast.makeText(context, "已添加歌单，共${added}首歌曲", Toast.LENGTH_LONG).show()
                             linkImportBusy = false
                             linkImportStatus = null
@@ -1423,7 +1581,7 @@ fun HyperApp() {
             ArtistPickerSheet(
                 song = artistPickerSong,
                 onDismiss = { artistPickerSong = null },
-                onPick = { _, artist -> pushRoute(MusicRoute.Artist(artist)) },
+                onPick = { name, id -> pushRoute(MusicRoute.Artist(name, id)) },
             )
 
             PlaybackQueueSheet(
@@ -1443,12 +1601,12 @@ fun HyperApp() {
                 onConfirm = {
                     val targets = confirmDeletePlaylists
                     confirmDeletePlaylists = emptyList()
-                    if (targets.size <= 1) {
-                        targets.firstOrNull()?.let { MusicLibrary.deletePlaylist(it.id) }
-                    } else {
-
-
-                        scope.launch {
+                    val deleteAll = targets.size > 1 && targets.size >= MusicLibrary.playlists.value.size
+                    when {
+                        targets.isEmpty() -> Unit
+                        targets.size == 1 -> MusicLibrary.deletePlaylist(targets.first().id)
+                        deleteAll -> MusicLibrary.deletePlaylists(targets.map { it.id })
+                        else -> scope.launch {
                             targets.forEachIndexed { i, playlist ->
                                 if (i > 0) delay(90)
                                 MusicLibrary.deletePlaylist(playlist.id)

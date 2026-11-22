@@ -9,12 +9,23 @@ import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 object LocalSongs {
 
     private const val UNKNOWN = "未知"
     private const val UNKNOWN_TAG = "<unknown>"
+
+    private val _revision = MutableStateFlow(0)
+
+    val revision: StateFlow<Int> = _revision.asStateFlow()
+
+    fun notifyChanged() {
+        _revision.value += 1
+    }
 
     private val AUDIO_EXT = setOf(
         "mp3", "flac", "m4a", "aac", "ogg", "oga", "opus", "wav", "wma",
@@ -164,15 +175,18 @@ object LocalSongs {
         var coverBytes: ByteArray? = null
 
         val retriever = MediaMetadataRetriever()
+        var rtTitle: String? = null
+        var rtArtist: String? = null
+        var rtAlbum: String? = null
         try {
             if (entry.path.isNotBlank()) {
                 retriever.setDataSource(entry.path)
             } else {
                 retriever.setDataSource(app, entry.uri)
             }
-            title = clean(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE))
-            artist = clean(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST))
-            album = clean(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM))
+            rtTitle = clean(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE))
+            rtArtist = clean(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST))
+            rtAlbum = clean(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM))
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull()
                 ?.takeIf { it > 0 }
@@ -183,6 +197,12 @@ object LocalSongs {
         } finally {
             runCatching { retriever.release() }
         }
+
+        val ext = entry.displayName.substringAfterLast('.', "")
+        val fileTags = readTagsFromEntry(app, entry, ext)
+        title = clean(fileTags.title) ?: rtTitle
+        artist = clean(fileTags.artist) ?: rtArtist
+        album = clean(fileTags.album) ?: rtAlbum
 
         val cover = coverBytes?.takeIf { it.isNotEmpty() }?.let { bytes ->
             runCatching { saveCover(app, entry.uri.toString(), bytes) }.getOrNull()
@@ -245,6 +265,24 @@ object LocalSongs {
         val directSongs: List<Song>,
     )
 
+    private fun readTagsFromEntry(app: Context, entry: Entry, ext: String): BasicTags {
+        if (entry.path.isNotBlank()) {
+            val file = File(entry.path)
+            if (file.isFile) {
+                return runCatching { LocalTagReader.readFile(file) }
+                    .getOrDefault(BasicTags.EMPTY)
+                    .takeIf { it.title != null || it.artist != null || it.album != null }
+                    ?: BasicTags.EMPTY
+            }
+        }
+        return runCatching {
+            app.contentResolver.openInputStream(entry.uri)?.use { input ->
+                val head = input.readNBytes(512 * 1024)
+                LocalTagReader.read(head, ext)
+            }
+        }.getOrNull() ?: BasicTags.EMPTY
+    }
+
     private fun saveCover(app: Context, key: String, bytes: ByteArray): String {
         val dir = File(app.cacheDir, "local_covers").apply { mkdirs() }
         val digest = MessageDigest.getInstance("MD5")
@@ -253,6 +291,9 @@ object LocalSongs {
         val file = File(dir, "$digest.img")
         if (!file.exists() || file.length() != bytes.size.toLong()) {
             file.writeBytes(bytes)
+        } else {
+            val existing = runCatching { file.readBytes() }.getOrNull()
+            if (existing == null || !existing.contentEquals(bytes)) file.writeBytes(bytes)
         }
         return Uri.fromFile(file).toString()
     }

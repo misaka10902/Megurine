@@ -1,7 +1,5 @@
 package com.hyper.music.music
 
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -17,6 +15,7 @@ data class PlaylistImportResult(
     val songs: List<Song>,
     val total: Int,
     val skipped: Int,
+    val cover: String = "",
 )
 
 object PlaylistImporter {
@@ -81,13 +80,14 @@ object PlaylistImporter {
                 val id = parseNeteaseId(url)
                     ?: resolveShortLink(url)?.let { parseNeteaseId(it) }
                     ?: throw IllegalArgumentException("无法从链接解析歌单 ID")
-                val (name, songs) = NeteaseApi.playlistTracks(id)
-                if (songs.isEmpty()) throw IllegalStateException("歌单为空或获取失败")
+                val info = MusicApi.playlistTracks(id)
+                if (info.songs.isEmpty()) throw IllegalStateException("歌单为空或获取失败")
                 PlaylistImportResult(
-                    name = name.ifBlank { "添加歌单" },
-                    songs = songs.distinctBy { it.id },
-                    total = songs.size,
+                    name = info.name.ifBlank { "添加歌单" },
+                    songs = info.songs.distinctBy { it.id },
+                    total = info.songs.size,
                     skipped = 0,
+                    cover = info.cover,
                 )
             }
             Platform.QQ -> {
@@ -318,43 +318,15 @@ object PlaylistImporter {
         return m?.groupValues?.getOrNull(1) ?: t
     }
 
-    private fun resolveShortLink(url: String): String? {
-        var conn: HttpURLConnection? = null
-        return try {
-            conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 12_000
-                readTimeout = 12_000
-                instanceFollowRedirects = true
-                setRequestProperty("User-Agent", UA)
-            }
-            conn.responseCode
-            conn.url?.toString()
-        } catch (_: Throwable) {
-            null
-        } finally {
-            conn?.disconnect()
-        }
-    }
+    private fun resolveShortLink(url: String): String? =
+        HttpClient.finalUrl(url, 12_000, 12_000, mapOf("User-Agent" to UA))
 
     private fun httpGet(url: String, referer: String? = null, timeoutMs: Int = 15_000): String? {
-        var conn: HttpURLConnection? = null
-        return try {
-            conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = timeoutMs
-                readTimeout = timeoutMs
-                instanceFollowRedirects = true
-                setRequestProperty("User-Agent", UA)
-                setRequestProperty("Accept", "application/json, text/plain, */*")
-                if (referer != null) setRequestProperty("Referer", referer)
-            }
-            if (conn.responseCode !in 200..299) return null
-            conn.inputStream.bufferedReader().use { it.readText() }
-        } catch (_: Throwable) {
-            null
-        } finally {
-            conn?.disconnect()
-        }
+        val headers = mutableMapOf(
+            "User-Agent" to UA,
+            "Accept" to "application/json, text/plain, */*",
+        )
+        if (referer != null) headers["Referer"] = referer
+        return HttpClient.text(url, timeoutMs, timeoutMs, headers)
     }
 }

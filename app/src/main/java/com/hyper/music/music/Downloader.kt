@@ -7,8 +7,6 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -26,25 +24,14 @@ object Downloader {
 
         val tempFile = File(context.cacheDir, "dl_${System.nanoTime()}.tmp")
         val taggedFile = File(context.cacheDir, "tg_${System.nanoTime()}.tmp")
-        var conn: HttpURLConnection? = null
-        try {
-            conn = (URL(info.url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15_000
-                readTimeout = 30_000
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
-            }
-            if (conn.responseCode !in 200..299) {
-                tempFile.delete()
-                return@withContext Result.Failure("下载失败（HTTP ${conn.responseCode}）")
-            }
-            tempFile.outputStream().use { output ->
-                conn.inputStream.use { input -> input.copyTo(output, 64 * 1024) }
-            }
-        } catch (t: Throwable) {
+        val code = HttpClient.downloadTo(
+            info.url, tempFile, 15_000, 30_000,
+            mapOf("User-Agent" to "Mozilla/5.0 (Linux; Android 14)"),
+        )
+        if (code !in 200..299) {
             tempFile.delete()
-            return@withContext Result.Failure(t.message ?: "下载失败")
-        } finally {
-            conn?.disconnect()
+            val msg = if (code < 0) "下载失败" else "下载失败（HTTP $code）"
+            return@withContext Result.Failure(msg)
         }
 
         val format = probeAudio(tempFile)
@@ -75,6 +62,7 @@ object Downloader {
         }
         tempFile.delete()
         taggedFile.delete()
+        if (result is Result.Success) LocalSongs.notifyChanged()
         result
     }
 

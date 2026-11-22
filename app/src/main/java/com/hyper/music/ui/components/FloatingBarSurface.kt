@@ -16,7 +16,6 @@ import top.yukonga.miuix.kmp.material.GlassMaterial
 import top.yukonga.miuix.kmp.material.GlassMaterials
 import top.yukonga.miuix.kmp.material.GlassShape
 
-
 @Composable
 internal fun hyperSurfaceColor(): Color {
     val isLightTheme = !isAppDarkTheme()
@@ -41,7 +40,6 @@ internal fun Modifier.floatingBarGlass(
         fallback = Modifier.clip(shape).background(hyperSurfaceColor().copy(alpha = 1f)),
     )
 }
-
 
 @Composable
 internal fun Modifier.floatingBarShadow(alphaScale: Float = 1f): Modifier {

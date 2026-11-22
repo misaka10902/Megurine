@@ -5,6 +5,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +23,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -39,8 +39,9 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.glass.GlassDialog
-import top.yukonga.miuix.kmp.glass.GlassDropdownPopup
+import top.yukonga.miuix.kmp.glass.GlassPopupAnchor
 import top.yukonga.miuix.kmp.glass.GlassPopupItem
+import top.yukonga.miuix.kmp.glass.GlassTransformPopup
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.glass.Edit
 import top.yukonga.miuix.kmp.icon.glass.Install
@@ -48,27 +49,23 @@ import top.yukonga.miuix.kmp.icon.glass.Link
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.PopupLayout
 
-
 @Composable
 internal fun PlaylistAddMenuPopup(
     expanded: Boolean,
-    anchorBounds: Rect,
+    anchor: GlassPopupAnchor,
+    anchorContent: @Composable () -> Unit,
     backdrop: Backdrop?,
     onDismiss: () -> Unit,
     onImportLink: () -> Unit,
     onImportJson: () -> Unit,
     onCreate: () -> Unit,
 ) {
-    val haptic = LocalHapticFeedback.current
     val mounted = remember { mutableStateOf(false) }
-
     LaunchedEffect(expanded) {
-        if (expanded) mounted.value = true
-    }
-
-    LaunchedEffect(expanded) {
-        if (!expanded && mounted.value) {
-            delay(260)
+        if (expanded) {
+            mounted.value = true
+        } else if (mounted.value) {
+            delay(320)
             mounted.value = false
         }
     }
@@ -83,44 +80,76 @@ internal fun PlaylistAddMenuPopup(
         renderInRootScaffold = true,
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            GlassDropdownPopup(
-                show = expanded,
-                onDismissRequest = onDismiss,
-                anchorBounds = anchorBounds,
-                backdrop = backdrop?.takeIf { LocalAdvancedMaterialEnabled.current },
-            ) {
-                GlassPopupItem(
-                    text = "链接导入",
-                    icon = MiuixIcons.Glass.Link,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onDismiss()
-                        onImportLink()
-                    },
-                )
-                GlassPopupItem(
-                    text = "JSON 导入",
-                    icon = MiuixIcons.Glass.Install,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onDismiss()
-                        onImportJson()
-                    },
-                )
-                GlassPopupItem(
-                    text = "手动创建",
-                    icon = MiuixIcons.Glass.Edit,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onDismiss()
-                        onCreate()
-                    },
-                )
-            }
+            PlaylistAddTransformContent(
+                expanded = expanded,
+                anchor = anchor,
+                anchorContent = anchorContent,
+                backdrop = backdrop,
+                onDismiss = onDismiss,
+                onImportLink = onImportLink,
+                onImportJson = onImportJson,
+                onCreate = onCreate,
+            )
         }
     }
 }
 
+@Composable
+private fun BoxScope.PlaylistAddTransformContent(
+    expanded: Boolean,
+    anchor: GlassPopupAnchor,
+    anchorContent: @Composable () -> Unit,
+    backdrop: Backdrop?,
+    onDismiss: () -> Unit,
+    onImportLink: () -> Unit,
+    onImportJson: () -> Unit,
+    onCreate: () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    val show = remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        show.value = true
+    }
+    LaunchedEffect(expanded) {
+        if (!expanded) show.value = false
+    }
+
+    GlassTransformPopup(
+        show = show.value,
+        onDismissRequest = onDismiss,
+        anchor = anchor,
+        backdrop = backdrop?.takeIf { LocalAdvancedMaterialEnabled.current },
+        anchorContent = anchorContent,
+    ) {
+        GlassPopupItem(
+            text = "链接导入",
+            icon = MiuixIcons.Glass.Link,
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                onDismiss()
+                onImportLink()
+            },
+        )
+        GlassPopupItem(
+            text = "JSON 导入",
+            icon = MiuixIcons.Glass.Install,
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                onDismiss()
+                onImportJson()
+            },
+        )
+        GlassPopupItem(
+            text = "手动创建",
+            icon = MiuixIcons.Glass.Edit,
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                onDismiss()
+                onCreate()
+            },
+        )
+    }
+}
 
 @Composable
 internal fun PlaylistLinkImportDialog(
@@ -208,7 +237,6 @@ internal fun PlaylistLinkImportDialog(
     }
 }
 
-
 @Composable
 internal fun PlaylistJsonImportDialog(
     show: Boolean,
@@ -243,7 +271,6 @@ internal fun PlaylistJsonImportDialog(
         }
     }
 }
-
 
 @Composable
 private fun ImportStatusLine(

@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -34,7 +36,6 @@ import com.hyper.music.music.Song
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -60,6 +61,7 @@ fun TrackRow(
     contentPadding: PaddingValues = PaddingValues(start = 28.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
     moreAlignEnd: Boolean = false,
     showLocalBadge: Boolean = true,
+    showAlbum: Boolean = true,
 ) {
     val scheme = MiuixTheme.colorScheme
     val coverUrl = remember(song.id) { GdApi.coverUrl(song, CoverSize.SMALL.request).ifBlank { null } }
@@ -103,23 +105,20 @@ fun TrackRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Start,
             ) {
+                if (song.isBili) {
+                    SourceBadge(text = "B站", container = Color(0xFFFB7299))
+                    Spacer(Modifier.width(5.dp))
+                } else if (showLocalBadge && song.isLocal) {
+                    SourceBadge(text = "本地", container = Color(0xFF21BA6A))
+                    Spacer(Modifier.width(5.dp))
+                }
                 Text(
-                    text = song.subtitle,
+                    text = if (showAlbum && !song.isBili) song.subtitle else song.artistText,
                     color = scheme.onSurfaceSecondary,
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-
-                if (showLocalBadge && song.isLocal) {
-                    Spacer(Modifier.width(6.dp))
-                    androidx.compose.foundation.Image(
-                        imageVector = MiuixIcons.Download,
-                        contentDescription = "已下载歌曲",
-                        modifier = Modifier.size(14.dp),
-                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(scheme.onSurfaceSecondary),
-                    )
-                }
             }
         }
 
@@ -161,6 +160,24 @@ fun TrackRow(
                 )
             }
         }
+    }
+}
+
+@Composable
+internal fun SourceBadge(text: String, container: Color) {
+    Box(
+        modifier = Modifier
+            .wrapContentSize()
+            .background(color = container.copy(alpha = 0.16f), shape = RoundedCornerShape(4.dp))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = container,
+            fontSize = 10.sp,
+            maxLines = 1,
+        )
     }
 }
 
