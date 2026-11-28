@@ -1,0 +1,307 @@
+
+
+package moe.megurine.music.ui.search
+
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.SearchClearButton
+import moe.megurine.music.ui.basic.NativeTextField
+import moe.megurine.music.ui.basic.rememberNativeTextFieldHandle
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.glass.Close
+import top.yukonga.miuix.kmp.icon.glass.Search
+import top.yukonga.miuix.kmp.material.GlassDefaults
+import top.yukonga.miuix.kmp.material.GlassShadows
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlinx.coroutines.delay
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+private const val SEARCH_TOP_BAR_BLUR_RADIUS = 50f
+
+private val SearchModeEasing: Easing = run {
+    val omega = 2.0 * PI / 0.75f
+    val stiffness = (omega * omega).toFloat()
+    val damping = (0.98f * 2.0 * omega).toFloat()
+    val decay = -damping / 2f
+    val frequency = sqrt(-(damping.toDouble() * damping - stiffness.toDouble() * 4)).toFloat() / 2f
+    val sineCoefficient = decay / frequency
+    Easing { fraction ->
+        (
+            1.0 + exp((decay * fraction).toDouble()) *
+                (-cos((frequency * fraction).toDouble()) + sineCoefficient * sin((frequency * fraction).toDouble()))
+            ).toFloat()
+    }
+}
+
+@Composable
+internal fun GlassSearchOverlay(
+    onDismissRequest: () -> Unit,
+    backdrop: LayerBackdrop,
+    modifier: Modifier = Modifier,
+    expanded: Boolean = false,
+    label: String = "搜索歌曲、歌手和专辑...",
+    query: String,
+    onQueryChange: (String) -> Unit,
+    backEnabled: Boolean = true,
+    content: @Composable ColumnScope.(String) -> Unit = {},
+) {
+    val transition = updateTransition(expanded, label = "glassSearch")
+    val progress = transition.animateFloat(
+        transitionSpec = { tween(400, easing = SearchModeEasing) },
+        label = "glassSearchGeometry",
+    ) { if (it) 1f else 0f }
+    val cancelAlpha = transition.animateFloat(
+        transitionSpec = { tween(150, delayMillis = if (targetState) 100 else 0, easing = LinearEasing) },
+        label = "glassSearchCancelMaterial",
+    ) { if (it) 1f else 0f }
+    val fieldHandle = rememberNativeTextFieldHandle()
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val topInsets = WindowInsets.statusBars.only(WindowInsetsSides.Top)
+    val active = expanded || transition.currentState || transition.isRunning
+    LaunchedEffect(expanded) {
+
+        if (expanded) {
+            onQueryChange("")
+
+            repeat(8) { attempt ->
+                fieldHandle.requestFocusAndShowIme()
+                delay(50)
+                if (attempt >= 2 && fieldHandle.editText?.isFocused == true) return@LaunchedEffect
+            }
+        } else if (active) {
+            focusManager.clearFocus()
+            fieldHandle.clearFocus()
+            keyboard?.hide()
+        }
+    }
+    if (!active) return
+    NavigationBackHandler(
+        state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
+        isBackEnabled = expanded && backEnabled,
+        onBackCompleted = onDismissRequest,
+    )
+    val colors = MiuixTheme.colorScheme
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent {
+                if (it.key == Key.Escape && it.type == KeyEventType.KeyUp) {
+                    onDismissRequest()
+                    true
+                } else {
+                    false
+                }
+            },
+    ) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(interactionSource = null, indication = null) { keyboard?.hide() },
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+
+                .layerBackdrop(backdrop)
+                .zIndex(1f)
+                .graphicsLayer { alpha = progress.value },
+        ) {
+            content(query)
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(2f)
+                .graphicsLayer { alpha = progress.value }
+                .windowInsetsPadding(topInsets)
+                .imePadding(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = GlassTopAppBarDefaults.HorizontalPadding, vertical = 4.dp)
+                    .graphicsLayer { translationY = -topInsets.getTop(this) * (1f - progress.value) }
+
+                    .zIndex(2f),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+
+                        .padding(end = 52.dp * progress.value)
+                        .height(44.dp)
+                        .background(colors.surfaceContainerHigh, CircleShape)
+                        .padding(start = 11.dp, end = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Icon(
+                        imageVector = MiuixIcons.Glass.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = colors.disabledOnSurface,
+                    )
+                    NativeTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        hint = label,
+                        textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface),
+                        singleLine = true,
+                        enabled = expanded,
+                        autoFocus = expanded,
+                        handle = fieldHandle,
+                        onDone = { keyboard?.hide() },
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (query.isNotEmpty()) {
+
+                        SearchClearButton(
+                            onClick = {
+                                onQueryChange("")
+                                fieldHandle.requestFocus()
+                            },
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                    .graphicsLayer {
+                        val fraction = progress.value
+                        translationX = 66.dp.toPx() * (1f - fraction)
+                        scaleX = fraction
+                        scaleY = fraction
+                        alpha = cancelAlpha.value
+                        val blur = 50f * (1f - cancelAlpha.value)
+                        renderEffect = if (blur > 0.5f) BlurEffect(blur, blur, TileMode.Decal) else null
+                    },
+            ) {
+                IconButton(
+                    onClick = onDismissRequest,
+                    enabled = expanded,
+                    modifier = Modifier.size(44.dp).background(colors.surfaceContainerHigh, CircleShape),
+                ) {
+                    Icon(MiuixIcons.Glass.Close, contentDescription = "Cancel", modifier = Modifier.size(28.dp), tint = colors.onSurface)
+                }
+            }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun rememberGlassSearchBarAlpha(expanded: Boolean): State<Float> {
+    val transition = updateTransition(expanded, label = "glassSearchTopBarOpacity")
+    return transition.animateFloat(
+        transitionSpec = {
+            tween(150, easing = if (targetState) CubicBezierEasing(0f, 0f, 0.67f, 1f) else CubicBezierEasing(0.26f, 0f, 0.6f, 0.2f))
+        },
+        label = "glassSearchTopBarAlpha",
+    ) { if (it) 0f else 1f }
+}
+
+@Composable
+internal fun Modifier.glassSearchBarTransition(expanded: Boolean, barAlpha: () -> Float): Modifier {
+    val density = LocalDensity.current
+    val layerOutset = remember(density) {
+        val shadow = GlassShadows.Regular
+        val shadowOutset = ((shadow.radius + maxOf(abs(shadow.offsetX), abs(shadow.offsetY))) / GlassDefaults.SourceDensity).dp
+        with(density) { shadowOutset.toPx() } + SEARCH_TOP_BAR_BLUR_RADIUS * 3f
+    }
+    val transition = updateTransition(expanded, label = "glassSearchTopBar")
+    val scale = transition.animateFloat(
+        transitionSpec = { tween(400, easing = SearchModeEasing) },
+        label = "glassSearchTopBarScale",
+    ) { if (it) 0.9f else 1f }
+    val blur = transition.animateFloat(
+        transitionSpec = { tween(if (targetState) 150 else 120, easing = LinearEasing) },
+        label = "glassSearchTopBarBlur",
+    ) { if (it) SEARCH_TOP_BAR_BLUR_RADIUS else 0f }
+    return drawWithCache {
+        val layer = obtainGraphicsLayer()
+        val halo = ceil(layerOutset).toInt()
+        val layerSize = IntSize(size.width.toInt() + halo * 2, size.height.toInt() + halo * 2)
+        onDrawWithContent {
+            val opacity = barAlpha().coerceIn(0f, 1f)
+            val currentScale = scale.value
+            val currentBlur = blur.value
+            if (opacity > 0f) {
+                if (opacity == 1f && currentScale == 1f && currentBlur == 0f) {
+                    drawContent()
+                } else {
+                    layer.record(density = this@drawWithCache, size = layerSize) {
+                        translate(halo.toFloat(), halo.toFloat()) { this@record.drawContent() }
+                    }
+                    layer.alpha = opacity
+                    layer.scaleX = currentScale
+                    layer.scaleY = currentScale
+                    layer.renderEffect = if (currentBlur > 0.5f) BlurEffect(currentBlur, currentBlur, TileMode.Decal) else null
+                    translate(-halo.toFloat(), -halo.toFloat()) { drawLayer(layer) }
+                }
+            }
+        }
+    }
+}

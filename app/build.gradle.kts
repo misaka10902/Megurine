@@ -1,21 +1,19 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
-    namespace = "com.hyper.music"
+    namespace = "moe.megurine.music"
     compileSdk = 37
     compileSdkMinor = 2
 
     defaultConfig {
-        applicationId = "com.hyper.music"
+        applicationId = "moe.megurine.music"
         minSdk = 33
         targetSdk = 37
-        versionCode = 20
-        versionName = "1.2.0"
+        versionCode = (findProperty("appVersionCode") as String?)?.toInt() ?: 31
+        versionName = (findProperty("appVersionName") as String?) ?: "1.3.1"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -28,17 +26,19 @@ android {
     signingConfigs {
         create("release") {
 
-            val props = Properties().apply {
-                val f = rootProject.file("local.properties")
-                if (f.exists()) f.inputStream().use { load(it) }
+            val keyFile = rootProject.file("signing/megurine-release.jks")
+            if (!keyFile.exists()) {
+                throw GradleException("缺少签名密钥：${keyFile.absolutePath}")
             }
-            fun secret(key: String, fallback: String): String =
-                props.getProperty(key) ?: System.getenv(key) ?: fallback
 
-            storeFile = file(secret("HYPER_STORE_FILE", "../_local/hyper-release.jks"))
-            storePassword = secret("HYPER_STORE_PASSWORD", "hyper123")
-            keyAlias = secret("HYPER_KEY_ALIAS", "hyper")
-            keyPassword = secret("HYPER_KEY_PASSWORD", "hyper123")
+            storeFile = keyFile
+            storePassword = "hyper123"
+            keyAlias = "hyper"
+            keyPassword = "hyper123"
+            enableV1Signing = false
+            enableV2Signing = true
+            enableV3Signing = false
+            enableV4Signing = false
         }
     }
 
@@ -72,8 +72,12 @@ android {
             excludes += "DebugProbesKt.bin"
 
             excludes += "META-INF/**/*.version"
+            excludes += "META-INF/*.version"
             excludes += "META-INF/version-control-info.textproto"
             excludes += "META-INF/com/android/build/gradle/app-metadata.properties"
+
+
+            excludes += "okhttp3/internal/publicsuffix/**"
         }
     }
     compileOptions {
@@ -84,12 +88,13 @@ android {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
 
-            freeCompilerArgs.add("-nowarn")
+            allWarningsAsErrors.set(true)
+            suppressWarnings.set(false)
         }
     }
     buildFeatures {
         compose = true
-        buildConfig = true
+        buildConfig = false
     }
 }
 
@@ -102,10 +107,6 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
 
     implementation(libs.androidx.activity.compose)
-
-    implementation(libs.androidx.compose.ui)
-
-    implementation(libs.androidx.compose.ui.graphics)
 
     implementation("androidx.compose.foundation:foundation:1.12.0")
     implementation("androidx.compose.foundation:foundation-layout:1.12.0")
@@ -134,15 +135,18 @@ dependencies {
 
     implementation(libs.navigationevent.compose)
 
-    implementation("androidx.media3:media3-exoplayer:1.10.1")
 
-    implementation("androidx.media3:media3-session:1.10.1")
+    implementation("androidx.media3:media3-exoplayer:1.11.0")
 
-    implementation("androidx.media3:media3-datasource:1.10.1")
+    implementation("androidx.media3:media3-session:1.11.0")
 
-    implementation("androidx.media3:media3-database:1.10.1")
+    implementation("androidx.media3:media3-datasource:1.11.0")
+
+    implementation("androidx.media3:media3-database:1.11.0")
 
     implementation("androidx.documentfile:documentfile:1.0.1")
+
+    implementation(libs.okhttp3)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

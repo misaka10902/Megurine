@@ -1,0 +1,24 @@
+package moe.megurine.music.ui.effects.miuix
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import moe.megurine.music.music.MusicLibrary
+import top.yukonga.miuix.kmp.blur.Backdrop
+
+val LocalAdvancedMaterialEnabled = staticCompositionLocalOf { true }
+
+val LocalActiveBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+
+val LocalPageBackdrop = staticCompositionLocalOf<androidx.compose.runtime.State<Backdrop?>?> { null }
+
+@Composable
+fun rememberAdvancedMaterialEnabled(): Boolean {
+    val settings by MusicLibrary.settings.collectAsState()
+    return settings.advancedMaterial
+}
+
+@Composable
+fun rememberPopupBackdrop(): Backdrop? =
+    LocalPageBackdrop.current?.value ?: LocalActiveBackdrop.current
