@@ -7,11 +7,13 @@
 
 #### 这是你想象中的小米音乐吗？
 
-![Android](https://img.shields.io/badge/Android-13%2B-3DDC84?labelColor=555&logo=android) ![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-blue) ![Miuix](https://img.shields.io/badge/Miuix-Glass-blue?labelColor=555) ![Media3](https://img.shields.io/badge/Media3-1.10.1-4F6BED?style=flat)
+![Android](https://img.shields.io/badge/Android-13%2B-3DDC84?labelColor=555&logo=android) ![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-blue) ![Miuix](https://img.shields.io/badge/Miuix-0.9.5-blue?labelColor=555) ![Media3](https://img.shields.io/badge/Media3-1.11.0-4F6BED?style=flat)
 
 </div>
 
 ---
+
+## 本README部分内容已过时，请以应用实际体验为准。
 
 ## 项目简介
 
